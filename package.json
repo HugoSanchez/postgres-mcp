@@ -19,6 +19,7 @@
     "test": "export PLAYWRIGHT=True && pnpm exec playwright test --workers=4"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^1.2.9",
     "@ai-sdk/react": "^1.2.8",
     "@ai-sdk/xai": "^1.2.10",
     "@codemirror/lang-javascript": "^6.2.2",
@@ -96,7 +97,7 @@
     "eslint": "^8.57.0",
     "eslint-config-next": "14.2.5",
     "eslint-config-prettier": "^9.1.0",
-    "eslint-import-resolver-typescript": "^3.6.3",
+    "eslint-import-resolver-typescript": "^3.8.7",
     "eslint-plugin-tailwindcss": "^3.17.5",
     "postcss": "^8",
     "tailwindcss": "^3.4.1",
