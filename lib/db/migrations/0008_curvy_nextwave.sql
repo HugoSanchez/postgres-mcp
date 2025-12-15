@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX IF NOT EXISTS "document_id_unique" ON "Document" USING btree ("id");

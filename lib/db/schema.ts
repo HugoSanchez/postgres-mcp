@@ -9,6 +9,10 @@ import {
   primaryKey,
   foreignKey,
   boolean,
+  integer,
+  jsonb,
+  index,
+  uniqueIndex,
 } from 'drizzle-orm/pg-core';
 
 export const user = pgTable('User', {
@@ -107,11 +111,14 @@ export const document = pgTable(
   {
     id: uuid('id').notNull().defaultRandom(),
     createdAt: timestamp('createdAt').notNull(),
+    updatedAt: timestamp('updatedAt').notNull().defaultNow(),
     title: text('title').notNull(),
-    content: text('content'),
-    kind: varchar('text', { enum: ['text', 'code', 'image', 'sheet'] })
-      .notNull()
-      .default('text'),
+    originalFilename: text('originalFilename'),
+    mimeType: text('mimeType'),
+    sizeBytes: integer('sizeBytes'),
+    blobUrl: text('blobUrl'),
+    checksumSha256: text('checksumSha256'),
+    pageCount: integer('pageCount'),
     userId: uuid('userId')
       .notNull()
       .references(() => user.id),
@@ -119,11 +126,50 @@ export const document = pgTable(
   (table) => {
     return {
       pk: primaryKey({ columns: [table.id, table.createdAt] }),
+      checksumIdx: index('document_checksum_idx').on(table.checksumSha256),
+      documentIdUnique: uniqueIndex('document_id_unique').on(table.id),
     };
   },
 );
 
 export type Document = InferSelectModel<typeof document>;
+
+export const documentPage = pgTable(
+  'DocumentPage',
+  {
+    id: uuid('id').notNull().defaultRandom(),
+    documentId: uuid('documentId')
+      .notNull()
+      .references(() => document.id),
+    pageIndex: integer('pageIndex').notNull(),
+    text: text('text'),
+    spans: jsonb('spans'),
+    hasOcr: boolean('hasOcr').notNull().default(false),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.id] }),
+    docIdx: index('document_page_doc_idx').on(table.documentId),
+  }),
+);
+
+export const documentOutline = pgTable(
+  'DocumentOutline',
+  {
+    id: uuid('id').notNull().defaultRandom(),
+    documentId: uuid('documentId')
+      .notNull()
+      .references(() => document.id),
+    title: text('title').notNull(),
+    pageIndex: integer('pageIndex').notNull(),
+    order: integer('order').notNull().default(0),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.id] }),
+    docIdx: index('document_outline_doc_idx').on(table.documentId),
+  }),
+);
 
 export const suggestion = pgTable(
   'Suggestion',
