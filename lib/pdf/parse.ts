@@ -1,12 +1,14 @@
-// IMPORTANT: Import polyfills FIRST, before pdfjs-dist
-// This ensures DOMMatrix is available when pdfjs-dist initializes
-import './init-polyfills';
-
+import DOMMatrix from '@thednp/dommatrix';
 import {
   GlobalWorkerOptions,
   getDocument,
 } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { ParsedPdf, ParsedPage, TextSpan } from './types';
+
+if (typeof globalThis.DOMMatrix === 'undefined') {
+  // @ts-ignore
+  globalThis.DOMMatrix = DOMMatrix;
+}
 
 // Ensure pdfjs knows where to find the worker in the Next.js bundle.
 // Using import.meta.url keeps the path stable in server builds.
