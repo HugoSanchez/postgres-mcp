@@ -196,3 +196,29 @@ export const suggestion = pgTable(
 );
 
 export type Suggestion = InferSelectModel<typeof suggestion>;
+
+export const epubChapter = pgTable(
+  'EpubChapter',
+  {
+    id: uuid('id').notNull().defaultRandom(),
+    documentId: uuid('documentId')
+      .notNull()
+      .references(() => document.id),
+    spineIndex: integer('spineIndex').notNull(),
+    href: text('href').notNull(),
+    title: text('title').notNull(),
+    html: text('html').notNull(),
+    text: text('text').notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.id] }),
+    docIdx: index('epub_chapter_doc_idx').on(table.documentId),
+    spineIdx: index('epub_chapter_spine_idx').on(
+      table.documentId,
+      table.spineIndex
+    ),
+  })
+);
+
+export type EpubChapter = InferSelectModel<typeof epubChapter>;

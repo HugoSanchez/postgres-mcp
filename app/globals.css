@@ -162,3 +162,49 @@
 .suggestion-highlight {
     @apply bg-blue-200 hover:bg-blue-300 dark:hover:bg-blue-400/50 dark:text-blue-50 dark:bg-blue-500/40;
 }
+
+/* Table styling for article reader - use !important to override prose defaults */
+.prose table,
+.prose [role="table"] {
+    @apply w-full border-collapse my-8 !important;
+    display: table !important;
+}
+
+.prose thead,
+.prose [role="rowgroup"]:first-child {
+    @apply border-b-2 border-border;
+    display: table-header-group !important;
+}
+
+.prose tbody {
+    display: table-row-group !important;
+}
+
+.prose tr,
+.prose [role="row"] {
+    display: table-row !important;
+}
+
+.prose th,
+.prose [role="columnheader"],
+.prose [role="table"] > [role="row"]:first-child [role="cell"] {
+    @apply border border-border bg-muted/50 px-4 py-2 text-left font-semibold;
+    display: table-cell !important;
+    font-weight: 600 !important;
+}
+
+.prose td,
+.prose [role="cell"] {
+    @apply border border-border px-4 py-2;
+    display: table-cell !important;
+}
+
+.prose tbody tr:hover,
+.prose [role="table"] [role="row"]:not(:first-child):hover {
+    @apply bg-muted/30;
+}
+
+.prose caption {
+    @apply text-sm text-muted-foreground mt-2;
+    display: table-caption !important;
+}

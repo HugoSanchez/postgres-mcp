@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { Blob } from 'buffer';
+import { Blob } from 'node:buffer';
 
 // Node runtime required (not edge)
 export const runtime = 'nodejs';

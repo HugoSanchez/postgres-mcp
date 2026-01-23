@@ -15,7 +15,7 @@
  */
 
 import { put } from '@vercel/blob';
-import { createHash } from 'crypto';
+import { createHash } from 'node:crypto';
 import { NextResponse } from 'next/server';
 
 import { auth } from '@/app/(auth)/auth';
