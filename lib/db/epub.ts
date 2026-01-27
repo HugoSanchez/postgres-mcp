@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { asc, eq } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 
@@ -77,9 +77,12 @@ export async function getEpubChapter(documentId: string, spineIndex: number) {
   const [chapter] = await db
     .select()
     .from(epubChapterTable)
-    .where(eq(epubChapterTable.documentId, documentId))
-    .orderBy(asc(epubChapterTable.spineIndex))
-    .offset(spineIndex)
+    .where(
+      and(
+        eq(epubChapterTable.documentId, documentId),
+        eq(epubChapterTable.spineIndex, spineIndex)
+      )
+    )
     .limit(1);
   return chapter ?? null;
 }

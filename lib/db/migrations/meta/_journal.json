@@ -71,6 +71,20 @@
       "when": 1768824404288,
       "tag": "0009_lean_nightshade",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1769437948460,
+      "tag": "0010_quiet_guardian",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1769443638238,
+      "tag": "0011_ambiguous_iron_fist",
+      "breakpoints": true
     }
   ]
 }

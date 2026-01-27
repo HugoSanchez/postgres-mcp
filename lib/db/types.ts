@@ -3,6 +3,8 @@ import type {
   documentOutline,
   documentPage,
   epubChapter,
+  highlight,
+  readingProgress,
 } from './schema';
 
 export type DocumentRow = typeof document.$inferSelect;
@@ -16,4 +18,20 @@ export type InsertDocumentOutline = typeof documentOutline.$inferInsert;
 
 export type EpubChapterRow = typeof epubChapter.$inferSelect;
 export type InsertEpubChapter = typeof epubChapter.$inferInsert;
+
+export type HighlightRow = typeof highlight.$inferSelect;
+export type InsertHighlight = typeof highlight.$inferInsert;
+
+// EPUB-specific anchor type
+export interface EpubHighlightAnchor {
+  chapterIndex: number;
+  startOffset: number;
+  endOffset: number;
+}
+
+export type HighlightColor = 'yellow' | 'green' | 'blue' | 'pink' | 'purple';
+export type DocumentType = 'epub' | 'pdf' | 'article';
+
+export type ReadingProgressRow = typeof readingProgress.$inferSelect;
+export type InsertReadingProgress = typeof readingProgress.$inferInsert;
 

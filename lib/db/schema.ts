@@ -13,6 +13,7 @@ import {
   jsonb,
   index,
   uniqueIndex,
+  real,
 } from 'drizzle-orm/pg-core';
 
 export const user = pgTable('User', {
@@ -222,3 +223,70 @@ export const epubChapter = pgTable(
 );
 
 export type EpubChapter = InferSelectModel<typeof epubChapter>;
+
+export const highlight = pgTable(
+  'Highlight',
+  {
+    id: uuid('id').notNull().defaultRandom(),
+    documentId: uuid('documentId')
+      .notNull()
+      .references(() => document.id),
+    documentType: varchar('documentType', {
+      enum: ['epub', 'pdf', 'article'],
+    }).notNull(),
+    userId: uuid('userId')
+      .notNull()
+      .references(() => user.id),
+    anchor: jsonb('anchor').notNull(), // { chapterIndex, startOffset, endOffset }
+    selectedText: text('selectedText').notNull(),
+    color: varchar('color', {
+      enum: ['yellow', 'green', 'blue', 'pink', 'purple'],
+    })
+      .notNull()
+      .default('yellow'),
+    note: text('note'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+    updatedAt: timestamp('updatedAt').notNull().defaultNow(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.id] }),
+    documentIdx: index('highlight_document_idx').on(table.documentId),
+    userIdx: index('highlight_user_idx').on(table.userId),
+    documentUserIdx: index('highlight_document_user_idx').on(
+      table.documentId,
+      table.userId
+    ),
+  })
+);
+
+export type Highlight = InferSelectModel<typeof highlight>;
+
+export const readingProgress = pgTable(
+  'ReadingProgress',
+  {
+    id: uuid('id').notNull().defaultRandom(),
+    userId: uuid('userId')
+      .notNull()
+      .references(() => user.id),
+    documentId: uuid('documentId')
+      .notNull()
+      .references(() => document.id),
+    documentType: varchar('documentType', {
+      enum: ['epub', 'pdf', 'article'],
+    }).notNull(),
+    chapterIndex: integer('chapterIndex'), // nullable for non-chapter docs
+    scrollPosition: real('scrollPosition').notNull().default(0), // 0-1 percentage
+    lastReadAt: timestamp('lastReadAt').notNull().defaultNow(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.id] }),
+    userDocumentUnique: uniqueIndex('reading_progress_user_document_idx').on(
+      table.userId,
+      table.documentId
+    ),
+    userIdx: index('reading_progress_user_idx').on(table.userId),
+    lastReadIdx: index('reading_progress_last_read_idx').on(table.lastReadAt),
+  })
+);
+
+export type ReadingProgress = InferSelectModel<typeof readingProgress>;

@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { BookOpen, Globe, Loader2, Upload, X } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { toast } from 'sonner';
@@ -9,7 +10,6 @@ import { SidebarToggle } from '../sidebar-toggle';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { useSidebar } from '../ui/sidebar';
-import { EpubReader } from './epub-reader';
 
 // Type for the article response from our API
 type ArticleResponse = {
@@ -21,21 +21,21 @@ type ArticleResponse = {
   length: number;
 };
 
-type ViewMode = 'input' | 'article' | 'epub';
+type ViewMode = 'input' | 'article';
 
 export function ReadingPane() {
+  const router = useRouter();
   const [url, setUrl] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // View mode: input (default), article, or epub
+  // View mode: input (default) or article
   const [viewMode, setViewMode] = useState<ViewMode>('input');
 
   // Article state: stores the fetched article info
   const [article, setArticle] = useState<ArticleResponse | null>(null);
 
-  // EPUB state
-  const [epubDocumentId, setEpubDocumentId] = useState<string | null>(null);
+  // EPUB upload state
   const [isUploadingEpub, setIsUploadingEpub] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -115,9 +115,9 @@ export function ReadingPane() {
       }
 
       const data = await res.json();
-      setEpubDocumentId(data.documentId);
-      setViewMode('epub');
       toast.success(`Loaded "${data.title || file.name}"`);
+      // Navigate to the read route
+      router.push(`/read/${data.documentId}`);
     } catch (err) {
       const message =
         err instanceof Error ? err.message : 'Failed to upload EPUB';
@@ -135,30 +135,10 @@ export function ReadingPane() {
   // Clear state and return to input mode
   const clearContent = () => {
     setArticle(null);
-    setEpubDocumentId(null);
     setUrl('');
     setError(null);
     setViewMode('input');
   };
-
-  // Render EPUB reader
-  if (viewMode === 'epub' && epubDocumentId) {
-    return (
-      <motion.div
-        className="relative bg-accent flex flex-1 flex-col overflow-hidden"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.2 }}
-      >
-        {!open && (
-          <div className="absolute left-2 top-2 z-10">
-            <SidebarToggle className="md:px-2 md:h-fit" />
-          </div>
-        )}
-        <EpubReader documentId={epubDocumentId} onClose={clearContent} />
-      </motion.div>
-    );
-  }
 
   // Render article reader when article is loaded
   if (viewMode === 'article' && article) {

@@ -163,48 +163,137 @@
     @apply bg-blue-200 hover:bg-blue-300 dark:hover:bg-blue-400/50 dark:text-blue-50 dark:bg-blue-500/40;
 }
 
-/* Table styling for article reader - use !important to override prose defaults */
-.prose table,
-.prose [role="table"] {
-    @apply w-full border-collapse my-8 !important;
-    display: table !important;
+/* Tables without thead (used for layout/poems) - display as normal blocks */
+.prose table:not(:has(thead)),
+.prose table:not(:has(thead)) tbody,
+.prose table:not(:has(thead)) tr,
+.prose table:not(:has(thead)) td {
+    display: block !important;
+    border: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    white-space: nowrap !important;
+    vertical-align: baseline !important;
 }
 
-.prose thead,
-.prose [role="rowgroup"]:first-child {
+/* Data tables (with thead) get proper table styling */
+.prose table:has(thead) {
+    @apply w-full border-collapse my-8;
+}
+
+.prose table:has(thead) thead {
     @apply border-b-2 border-border;
-    display: table-header-group !important;
 }
 
-.prose tbody {
-    display: table-row-group !important;
-}
-
-.prose tr,
-.prose [role="row"] {
-    display: table-row !important;
-}
-
-.prose th,
-.prose [role="columnheader"],
-.prose [role="table"] > [role="row"]:first-child [role="cell"] {
+.prose table:has(thead) th {
     @apply border border-border bg-muted/50 px-4 py-2 text-left font-semibold;
-    display: table-cell !important;
-    font-weight: 600 !important;
 }
 
-.prose td,
-.prose [role="cell"] {
+.prose table:has(thead) td {
     @apply border border-border px-4 py-2;
-    display: table-cell !important;
 }
 
-.prose tbody tr:hover,
-.prose [role="table"] [role="row"]:not(:first-child):hover {
+.prose table:has(thead) tbody tr:hover {
     @apply bg-muted/30;
 }
 
 .prose caption {
     @apply text-sm text-muted-foreground mt-2;
-    display: table-caption !important;
+}
+
+/* Reset borders for EPUB content - only tables should have borders */
+.prose p,
+.prose span,
+.prose div:not([role="table"]),
+.prose section,
+.prose article,
+.prose aside,
+.prose br {
+    border: none !important;
+}
+
+/* Poetry/verse styling for EPUB reader */
+.prose .poem,
+.prose .verse,
+.prose .stanza,
+.prose [class*="poem"],
+.prose [class*="verse"],
+.prose [class*="stanza"],
+.prose [class*="line-group"] {
+    @apply my-4;
+    white-space: pre-wrap;
+    border: none !important;
+}
+
+.prose .poem p,
+.prose .verse p,
+.prose .stanza p,
+.prose [class*="poem"] p,
+.prose [class*="verse"] p,
+.prose [class*="stanza"] p {
+    @apply my-0 leading-relaxed;
+    text-indent: 0 !important;
+}
+
+.prose .poem span,
+.prose .verse span,
+.prose [class*="poem"] span,
+.prose [class*="verse"] span,
+.prose .line,
+.prose [class*="line"]:not([class*="underline"]) {
+    display: block;
+}
+
+/* Highlight styles for EPUB reader */
+.highlight {
+    @apply rounded-sm cursor-pointer transition-colors;
+}
+
+.highlight-pending {
+    background-color: rgb(156 163 175 / 0.4);
+}
+
+.dark .highlight-pending {
+    background-color: rgb(107 114 128 / 0.4);
+}
+
+.highlight-yellow {
+    background-color: rgb(254 249 195 / 0.7);
+}
+
+.highlight-green {
+    background-color: rgb(187 247 208 / 0.7);
+}
+
+.highlight-blue {
+    background-color: rgb(191 219 254 / 0.7);
+}
+
+.highlight-pink {
+    background-color: rgb(251 207 232 / 0.7);
+}
+
+.highlight-purple {
+    background-color: rgb(233 213 255 / 0.7);
+}
+
+/* Dark mode highlight variants */
+.dark .highlight-yellow {
+    background-color: rgb(202 138 4 / 0.3);
+}
+
+.dark .highlight-green {
+    background-color: rgb(22 163 74 / 0.3);
+}
+
+.dark .highlight-blue {
+    background-color: rgb(37 99 235 / 0.3);
+}
+
+.dark .highlight-pink {
+    background-color: rgb(219 39 119 / 0.3);
+}
+
+.dark .highlight-purple {
+    background-color: rgb(147 51 234 / 0.3);
 }

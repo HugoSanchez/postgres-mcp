@@ -14,12 +14,12 @@ export default async function Page() {
     cookieStore.get('chat-model')?.value ?? DEFAULT_CHAT_MODEL;
 
   return (
-    <div className="grid min-h-dvh grid-cols-1 md:grid-cols-2">
-      <section className="hidden h-full flex-col border-r bg-muted/30 md:flex">
+    <div className="grid h-dvh grid-cols-1 md:grid-cols-2 overflow-hidden">
+      <section className="hidden h-full flex-col border-r bg-muted/30 md:flex overflow-hidden">
         <ReadingPane />
       </section>
 
-      <section className="flex min-w-0 flex-col">
+      <section className="flex min-w-0 flex-col h-full overflow-hidden">
         <Chat
           key={id}
           id={id}

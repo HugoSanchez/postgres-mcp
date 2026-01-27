@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useRef } from 'react';
 import {
   BookOpen,
   ChevronLeft,
@@ -19,6 +19,7 @@ import {
   DropdownMenuTrigger,
 } from '../ui/dropdown-menu';
 import { EpubChapter } from './epub-chapter';
+import type { HighlightRow, HighlightColor } from '@/lib/db/types';
 
 interface ChapterMeta {
   id: string;
@@ -52,10 +53,21 @@ interface EpubDocument {
 
 interface EpubReaderProps {
   documentId: string;
+  initialChapter?: number;
+  initialScrollPosition?: number;
   onClose: () => void;
+  onChapterChange?: (chapterIndex: number) => void;
+  onProgressChange?: (chapterIndex: number, scrollPosition: number) => void;
 }
 
-export function EpubReader({ documentId, onClose }: EpubReaderProps) {
+export function EpubReader({
+  documentId,
+  initialChapter = 0,
+  initialScrollPosition = 0,
+  onClose,
+  onChapterChange,
+  onProgressChange,
+}: EpubReaderProps) {
   // Document metadata
   const [document, setDocument] = useState<EpubDocument | null>(null);
   const [chapters, setChapters] = useState<ChapterMeta[]>([]);
@@ -71,6 +83,15 @@ export function EpubReader({ documentId, onClose }: EpubReaderProps) {
   const [isLoadingDoc, setIsLoadingDoc] = useState(true);
   const [isLoadingChapter, setIsLoadingChapter] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Highlights state
+  const [highlights, setHighlights] = useState<HighlightRow[]>([]);
+
+  // Scroll tracking
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const shouldRestoreScroll = useRef(initialChapter === 0 && initialScrollPosition > 0);
+  const hasRestoredScroll = useRef(false);
 
   // Fetch document metadata and chapter list
   useEffect(() => {
@@ -99,6 +120,24 @@ export function EpubReader({ documentId, onClose }: EpubReaderProps) {
     fetchDocument();
   }, [documentId]);
 
+  // Fetch highlights for a chapter
+  const fetchHighlights = useCallback(
+    async (chapterIndex: number) => {
+      try {
+        const res = await fetch(
+          `/api/highlights?documentId=${documentId}&chapterIndex=${chapterIndex}`
+        );
+        if (res.ok) {
+          const data = await res.json();
+          setHighlights(data.highlights || []);
+        }
+      } catch (err) {
+        console.error('Failed to fetch highlights:', err);
+      }
+    },
+    [documentId]
+  );
+
   // Fetch chapter content
   const fetchChapter = useCallback(
     async (index: number) => {
@@ -114,21 +153,28 @@ export function EpubReader({ documentId, onClose }: EpubReaderProps) {
         const data = await res.json();
         setCurrentChapter(data.chapter);
         setCurrentChapterIndex(index);
+
+        // Notify parent of chapter change
+        onChapterChange?.(index);
+
+        // Fetch highlights for this chapter
+        fetchHighlights(index);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load chapter');
       } finally {
         setIsLoadingChapter(false);
       }
     },
-    [documentId]
+    [documentId, fetchHighlights, onChapterChange]
   );
 
-  // Load first chapter when document is loaded
+  // Load initial chapter when document is loaded
   useEffect(() => {
     if (chapters.length > 0 && !currentChapter) {
-      fetchChapter(0);
+      const startChapter = Math.min(initialChapter, chapters.length - 1);
+      fetchChapter(startChapter);
     }
-  }, [chapters, currentChapter, fetchChapter]);
+  }, [chapters, currentChapter, fetchChapter, initialChapter]);
 
   // Navigation handlers
   const goToPrevChapter = () => {
@@ -149,6 +195,40 @@ export function EpubReader({ documentId, onClose }: EpubReaderProps) {
     }
   };
 
+  // Create highlight handler
+  const handleCreateHighlight = useCallback(
+    async (data: {
+      startOffset: number;
+      endOffset: number;
+      selectedText: string;
+      color: HighlightColor;
+    }) => {
+      const res = await fetch('/api/highlights', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          documentId,
+          documentType: 'epub',
+          anchor: {
+            chapterIndex: currentChapterIndex,
+            startOffset: data.startOffset,
+            endOffset: data.endOffset,
+          },
+          selectedText: data.selectedText,
+          color: data.color,
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error('Failed to create highlight');
+      }
+
+      // Refresh highlights
+      fetchHighlights(currentChapterIndex);
+    },
+    [documentId, currentChapterIndex, fetchHighlights]
+  );
+
   // Keyboard navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -165,6 +245,60 @@ export function EpubReader({ documentId, onClose }: EpubReaderProps) {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [currentChapterIndex, chapters.length, fetchChapter]);
+
+  // Scroll tracking (debounced)
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container || !onProgressChange) return;
+
+    const handleScroll = () => {
+      // Clear previous timeout
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
+
+      // Debounce: update after 1 second of no scrolling
+      scrollTimeoutRef.current = setTimeout(() => {
+        const scrollTop = container.scrollTop;
+        const scrollHeight = container.scrollHeight - container.clientHeight;
+        const scrollPosition = scrollHeight > 0 ? scrollTop / scrollHeight : 0;
+
+        onProgressChange(currentChapterIndex, scrollPosition);
+      }, 1000);
+    };
+
+    container.addEventListener('scroll', handleScroll);
+
+    return () => {
+      container.removeEventListener('scroll', handleScroll);
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
+    };
+  }, [currentChapterIndex, onProgressChange]);
+
+  // Restore scroll position after chapter loads
+  useEffect(() => {
+    if (
+      shouldRestoreScroll.current &&
+      !hasRestoredScroll.current &&
+      !isLoadingChapter &&
+      currentChapter &&
+      scrollContainerRef.current
+    ) {
+      // Small delay to ensure content is rendered
+      const timeout = setTimeout(() => {
+        const container = scrollContainerRef.current;
+        if (container) {
+          const scrollHeight = container.scrollHeight - container.clientHeight;
+          container.scrollTop = scrollHeight * initialScrollPosition;
+          hasRestoredScroll.current = true;
+        }
+      }, 100);
+
+      return () => clearTimeout(timeout);
+    }
+  }, [isLoadingChapter, currentChapter, initialScrollPosition]);
 
   // Loading state
   if (isLoadingDoc) {
@@ -255,7 +389,7 @@ export function EpubReader({ documentId, onClose }: EpubReaderProps) {
       </div>
 
       {/* Chapter Content */}
-      <div className="flex flex-1 overflow-auto">
+      <div ref={scrollContainerRef} className="flex flex-1 overflow-auto">
         <div className="w-full max-w-3xl mx-auto p-6">
           <AnimatePresence mode="wait">
             {isLoadingChapter ? (
@@ -273,6 +407,8 @@ export function EpubReader({ documentId, onClose }: EpubReaderProps) {
                 key={currentChapter.id}
                 title={currentChapter.title}
                 html={currentChapter.html}
+                highlights={highlights}
+                onCreateHighlight={handleCreateHighlight}
               />
             ) : null}
           </AnimatePresence>
