@@ -98,7 +98,9 @@ function findRangeByOffset(
 }
 
 /**
- * Wrap a Range with a <mark> element.
+ * Wrap a Range with <mark> elements.
+ * For ranges spanning multiple elements, wraps each text node individually
+ * to avoid corrupting the DOM structure.
  */
 function wrapRangeWithMark(
   doc: Document,
@@ -106,16 +108,108 @@ function wrapRangeWithMark(
   color: string,
   highlightId: string
 ): void {
-  const mark = doc.createElement('mark');
-  mark.className = `highlight highlight-${color}`;
-  mark.setAttribute('data-highlight-id', highlightId);
-
-  try {
+  // If the range is within a single text node, use the simple approach
+  if (
+    range.startContainer === range.endContainer &&
+    range.startContainer.nodeType === Node.TEXT_NODE
+  ) {
+    const mark = doc.createElement('mark');
+    mark.className = `highlight highlight-${color}`;
+    mark.setAttribute('data-highlight-id', highlightId);
     range.surroundContents(mark);
-  } catch {
-    // If surroundContents fails (spans multiple elements), use extractContents
-    const fragment = range.extractContents();
-    mark.appendChild(fragment);
-    range.insertNode(mark);
+    return;
+  }
+
+  // For ranges spanning multiple elements, wrap each text node individually
+  // First, collect all text nodes within the range
+  const textNodes: Array<{ node: Text; start: number; end: number }> = [];
+  const walker = doc.createTreeWalker(
+    range.commonAncestorContainer,
+    NodeFilter.SHOW_TEXT,
+    null
+  );
+
+  let node = walker.nextNode() as Text | null;
+  while (node) {
+    // Check if this text node is within the range
+    const nodeRange = doc.createRange();
+    nodeRange.selectNodeContents(node);
+
+    const startsBeforeEnd = range.compareBoundaryPoints(Range.START_TO_END, nodeRange) > 0;
+    const endsAfterStart = range.compareBoundaryPoints(Range.END_TO_START, nodeRange) < 0;
+
+    if (startsBeforeEnd && endsAfterStart) {
+      // This node overlaps with our range
+      const nodeLength = node.textContent?.length || 0;
+
+      // Calculate the portion of this node to highlight
+      let start = 0;
+      let end = nodeLength;
+
+      if (node === range.startContainer) {
+        start = range.startOffset;
+      }
+      if (node === range.endContainer) {
+        end = range.endOffset;
+      }
+
+      if (start < end && end <= nodeLength) {
+        textNodes.push({ node, start, end });
+      }
+    }
+
+    node = walker.nextNode() as Text | null;
+  }
+
+  // Wrap each text node portion (process in reverse to preserve offsets)
+  for (let i = textNodes.length - 1; i >= 0; i--) {
+    const { node, start, end } = textNodes[i];
+    const nodeLength = node.textContent?.length || 0;
+
+    // Skip empty portions
+    if (start >= end || start >= nodeLength) continue;
+
+    const mark = doc.createElement('mark');
+    mark.className = `highlight highlight-${color}`;
+    mark.setAttribute('data-highlight-id', highlightId);
+
+    // Split the text node if necessary and wrap the middle part
+    if (start > 0 || end < nodeLength) {
+      // We need to split the text node
+      const textContent = node.textContent || '';
+
+      // Create the parts
+      const beforeText = textContent.slice(0, start);
+      const highlightText = textContent.slice(start, end);
+      const afterText = textContent.slice(end);
+
+      // Create new nodes
+      const parent = node.parentNode;
+      if (!parent) continue;
+
+      // Build replacement nodes
+      const fragment = doc.createDocumentFragment();
+
+      if (beforeText) {
+        fragment.appendChild(doc.createTextNode(beforeText));
+      }
+
+      mark.textContent = highlightText;
+      fragment.appendChild(mark);
+
+      if (afterText) {
+        fragment.appendChild(doc.createTextNode(afterText));
+      }
+
+      // Replace the original text node
+      parent.replaceChild(fragment, node);
+    } else {
+      // Wrap the entire text node
+      const parent = node.parentNode;
+      if (!parent) continue;
+
+      mark.textContent = node.textContent;
+      parent.replaceChild(mark, node);
+    }
   }
 }

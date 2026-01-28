@@ -69,6 +69,7 @@ export function EpubChapter({
   const contentRef = useRef<HTMLDivElement>(null);
   const pendingHighlightRef = useRef<PendingHighlight | null>(null);
   const lastAppliedHtmlRef = useRef<string>('');
+  const skipNextHtmlUpdateRef = useRef(false);
   const [popoverData, setPopoverData] = useState<{ x: number; y: number } | null>(null);
   const [isCreatingHighlight, setIsCreatingHighlight] = useState(false);
   const isSelectingRef = useRef(false);
@@ -82,6 +83,12 @@ export function EpubChapter({
   // Use a ref to track what we last applied, to avoid resetting when we have pending marks
   useEffect(() => {
     if (contentRef.current && htmlWithHighlights !== lastAppliedHtmlRef.current) {
+      // Skip the update if we just created a highlight (DOM already has correct visual)
+      if (skipNextHtmlUpdateRef.current) {
+        skipNextHtmlUpdateRef.current = false;
+        lastAppliedHtmlRef.current = htmlWithHighlights;
+        return;
+      }
       contentRef.current.innerHTML = htmlWithHighlights;
       lastAppliedHtmlRef.current = htmlWithHighlights;
     }
@@ -214,6 +221,8 @@ export function EpubChapter({
           color,
         });
 
+        // Skip the next HTML update since DOM already has the correct visual
+        skipNextHtmlUpdateRef.current = true;
         // Clear pending (the real highlight will come from re-fetch)
         pendingHighlightRef.current = null;
         setPopoverData(null);

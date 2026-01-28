@@ -164,7 +164,16 @@
 }
 
 /* Tables without thead (used for layout/poems) - display as normal blocks */
-.prose table:not(:has(thead)),
+.prose table:not(:has(thead)) {
+    display: block !important;
+    border: none !important;
+    padding: 0 !important;
+    margin-bottom: 1em !important; /* Space between stanzas */
+    margin-top: 0 !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+}
+
 .prose table:not(:has(thead)) tbody,
 .prose table:not(:has(thead)) tr,
 .prose table:not(:has(thead)) td {
@@ -199,6 +208,29 @@
 
 .prose caption {
     @apply text-sm text-muted-foreground mt-2;
+}
+
+/* Figure and figcaption styling for images */
+.prose figure {
+    @apply my-6 mx-auto text-center;
+}
+
+.prose figure img {
+    @apply mx-auto rounded-lg shadow-md;
+}
+
+.prose figcaption,
+.prose [class*="caption"] {
+    @apply text-sm text-muted-foreground mt-2 italic text-center;
+}
+
+/* EPUB media objects (images with captions) */
+.prose [class*="mediaobject"] {
+    @apply my-6 mx-auto text-center;
+}
+
+.prose [class*="mediaobject"] img {
+    @apply mx-auto rounded-lg shadow-md;
 }
 
 /* Reset borders for EPUB content - only tables should have borders */
