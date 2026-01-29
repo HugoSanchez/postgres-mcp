@@ -3,13 +3,11 @@
 import { useCallback, useEffect, useState, useRef } from 'react';
 import {
   BookOpen,
-  ChevronLeft,
-  ChevronRight,
   List,
   Loader2,
   X,
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 
 import { Button } from '../ui/button';
 import {
@@ -19,6 +17,9 @@ import {
   DropdownMenuTrigger,
 } from '../ui/dropdown-menu';
 import { EpubChapter } from './epub-chapter';
+import { SidePanel } from './side-panel';
+import { MobilePanel } from './mobile-panel';
+import { useIsMobile } from '@/hooks/use-mobile';
 import type { HighlightRow, HighlightColor } from '@/lib/db/types';
 
 interface ChapterMeta {
@@ -73,25 +74,33 @@ export function EpubReader({
   const [chapters, setChapters] = useState<ChapterMeta[]>([]);
   const [outline, setOutline] = useState<OutlineItem[]>([]);
 
-  // Current chapter state
-  const [currentChapterIndex, setCurrentChapterIndex] = useState(0);
-  const [currentChapter, setCurrentChapter] = useState<ChapterContent | null>(
-    null
-  );
+  // Loaded chapters (for infinite scroll)
+  const [loadedChapters, setLoadedChapters] = useState<Map<number, ChapterContent>>(new Map());
+  const [visibleChapterIndices, setVisibleChapterIndices] = useState<number[]>([]);
+  const [currentChapterIndex, setCurrentChapterIndex] = useState(initialChapter);
 
   // Loading states
   const [isLoadingDoc, setIsLoadingDoc] = useState(true);
-  const [isLoadingChapter, setIsLoadingChapter] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Highlights state
-  const [highlights, setHighlights] = useState<HighlightRow[]>([]);
+  // Highlights state (per chapter)
+  const [highlightsByChapter, setHighlightsByChapter] = useState<Map<number, HighlightRow[]>>(new Map());
 
   // Scroll tracking
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const loadMoreTriggerRef = useRef<HTMLDivElement>(null);
+  const chapterRefs = useRef<Map<number, HTMLDivElement>>(new Map());
   const shouldRestoreScroll = useRef(initialChapter === 0 && initialScrollPosition > 0);
   const hasRestoredScroll = useRef(false);
+
+  // Side panel state
+  const isMobile = useIsMobile();
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<'chat' | 'notes'>('chat');
+  const [chatContext, setChatContext] = useState('');
+  const [notes, setNotes] = useState('');
 
   // Fetch document metadata and chapter list
   useEffect(() => {
@@ -129,7 +138,11 @@ export function EpubReader({
         );
         if (res.ok) {
           const data = await res.json();
-          setHighlights(data.highlights || []);
+          setHighlightsByChapter(prev => {
+            const next = new Map(prev);
+            next.set(chapterIndex, data.highlights || []);
+            return next;
+          });
         }
       } catch (err) {
         console.error('Failed to fetch highlights:', err);
@@ -140,8 +153,10 @@ export function EpubReader({
 
   // Fetch chapter content
   const fetchChapter = useCallback(
-    async (index: number) => {
-      setIsLoadingChapter(true);
+    async (index: number): Promise<ChapterContent | null> => {
+      // Return cached chapter if available
+      const cached = loadedChapters.get(index);
+      if (cached) return cached;
 
       try {
         const res = await fetch(`/api/epub/${documentId}?chapter=${index}`);
@@ -151,53 +166,139 @@ export function EpubReader({
         }
 
         const data = await res.json();
-        setCurrentChapter(data.chapter);
-        setCurrentChapterIndex(index);
+        const chapter = data.chapter as ChapterContent;
 
-        // Notify parent of chapter change
-        onChapterChange?.(index);
+        // Cache the chapter
+        setLoadedChapters(prev => {
+          const next = new Map(prev);
+          next.set(index, chapter);
+          return next;
+        });
 
         // Fetch highlights for this chapter
         fetchHighlights(index);
+
+        return chapter;
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load chapter');
-      } finally {
-        setIsLoadingChapter(false);
+        console.error('Failed to load chapter:', err);
+        return null;
       }
     },
-    [documentId, fetchHighlights, onChapterChange]
+    [documentId, loadedChapters, fetchHighlights]
   );
 
   // Load initial chapter when document is loaded
   useEffect(() => {
-    if (chapters.length > 0 && !currentChapter) {
+    if (chapters.length > 0 && visibleChapterIndices.length === 0) {
       const startChapter = Math.min(initialChapter, chapters.length - 1);
-      fetchChapter(startChapter);
+      setIsLoadingMore(true);
+      fetchChapter(startChapter).then(() => {
+        setVisibleChapterIndices([startChapter]);
+        setCurrentChapterIndex(startChapter);
+        onChapterChange?.(startChapter);
+        setIsLoadingMore(false);
+      });
     }
-  }, [chapters, currentChapter, fetchChapter, initialChapter]);
+  }, [chapters, visibleChapterIndices.length, fetchChapter, initialChapter, onChapterChange]);
 
-  // Navigation handlers
-  const goToPrevChapter = () => {
-    if (currentChapterIndex > 0) {
-      fetchChapter(currentChapterIndex - 1);
-    }
-  };
+  // Load more chapters when scrolling near bottom (intersection observer)
+  useEffect(() => {
+    const trigger = loadMoreTriggerRef.current;
+    if (!trigger) return;
 
-  const goToNextChapter = () => {
-    if (currentChapterIndex < chapters.length - 1) {
-      fetchChapter(currentChapterIndex + 1);
-    }
-  };
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (entry.isIntersecting && !isLoadingMore && visibleChapterIndices.length > 0) {
+          const lastVisibleIndex = visibleChapterIndices[visibleChapterIndices.length - 1];
+          const nextIndex = lastVisibleIndex + 1;
 
-  const goToChapter = (index: number) => {
-    if (index >= 0 && index < chapters.length) {
-      fetchChapter(index);
-    }
-  };
+          if (nextIndex < chapters.length) {
+            setIsLoadingMore(true);
+            fetchChapter(nextIndex).then((chapter) => {
+              if (chapter) {
+                setVisibleChapterIndices(prev => [...prev, nextIndex]);
+              }
+              setIsLoadingMore(false);
+            });
+          }
+        }
+      },
+      { rootMargin: '200px' }
+    );
+
+    observer.observe(trigger);
+    return () => observer.disconnect();
+  }, [chapters.length, visibleChapterIndices, isLoadingMore, fetchChapter]);
+
+  // Track current chapter based on scroll position
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    const handleScroll = () => {
+      // Find which chapter is most visible
+      let mostVisibleIndex = visibleChapterIndices[0] ?? 0;
+      let maxVisibleArea = 0;
+
+      for (const index of visibleChapterIndices) {
+        const el = chapterRefs.current.get(index);
+        if (!el) continue;
+
+        const rect = el.getBoundingClientRect();
+        const containerRect = container.getBoundingClientRect();
+
+        // Calculate visible area of this chapter
+        const visibleTop = Math.max(rect.top, containerRect.top);
+        const visibleBottom = Math.min(rect.bottom, containerRect.bottom);
+        const visibleHeight = Math.max(0, visibleBottom - visibleTop);
+
+        if (visibleHeight > maxVisibleArea) {
+          maxVisibleArea = visibleHeight;
+          mostVisibleIndex = index;
+        }
+      }
+
+      if (mostVisibleIndex !== currentChapterIndex) {
+        setCurrentChapterIndex(mostVisibleIndex);
+        onChapterChange?.(mostVisibleIndex);
+      }
+    };
+
+    container.addEventListener('scroll', handleScroll, { passive: true });
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, [visibleChapterIndices, currentChapterIndex, onChapterChange]);
+
+  // Navigation handler (for TOC)
+  const goToChapter = useCallback(
+    async (index: number) => {
+      if (index < 0 || index >= chapters.length) return;
+
+      // If chapter is already loaded and visible, scroll to it
+      if (visibleChapterIndices.includes(index)) {
+        const el = chapterRefs.current.get(index);
+        el?.scrollIntoView({ behavior: 'smooth' });
+        return;
+      }
+
+      // Otherwise, reset to just this chapter
+      setIsLoadingMore(true);
+      const chapter = await fetchChapter(index);
+      if (chapter) {
+        setVisibleChapterIndices([index]);
+        setCurrentChapterIndex(index);
+        onChapterChange?.(index);
+        // Scroll to top
+        scrollContainerRef.current?.scrollTo({ top: 0 });
+      }
+      setIsLoadingMore(false);
+    },
+    [chapters.length, visibleChapterIndices, fetchChapter, onChapterChange]
+  );
 
   // Create highlight handler
   const handleCreateHighlight = useCallback(
-    async (data: {
+    async (chapterIndex: number, data: {
       startOffset: number;
       endOffset: number;
       selectedText: string;
@@ -210,7 +311,7 @@ export function EpubReader({
           documentId,
           documentType: 'epub',
           anchor: {
-            chapterIndex: currentChapterIndex,
+            chapterIndex,
             startOffset: data.startOffset,
             endOffset: data.endOffset,
           },
@@ -223,41 +324,37 @@ export function EpubReader({
         throw new Error('Failed to create highlight');
       }
 
-      // Refresh highlights
-      fetchHighlights(currentChapterIndex);
+      // Refresh highlights for this chapter
+      fetchHighlights(chapterIndex);
     },
-    [documentId, currentChapterIndex, fetchHighlights]
+    [documentId, fetchHighlights]
   );
 
-  // Keyboard navigation
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowLeft' && currentChapterIndex > 0) {
-        fetchChapter(currentChapterIndex - 1);
-      } else if (
-        e.key === 'ArrowRight' &&
-        currentChapterIndex < chapters.length - 1
-      ) {
-        fetchChapter(currentChapterIndex + 1);
-      }
-    };
+  // Handle Ask AI action from selection
+  const handleAskAI = useCallback((selectedText: string) => {
+    setChatContext(selectedText);
+    setActiveTab('chat');
+    setPanelOpen(true);
+  }, []);
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [currentChapterIndex, chapters.length, fetchChapter]);
+  // Handle Add to Notes action from selection
+  const handleAddToNotes = useCallback((selectedText: string) => {
+    const quotedText = `> ${selectedText}\n\n`;
+    setNotes((prev) => (prev ? `${prev}${quotedText}` : quotedText));
+    setActiveTab('notes');
+    setPanelOpen(true);
+  }, []);
 
-  // Scroll tracking (debounced)
+  // Scroll tracking for progress (debounced)
   useEffect(() => {
     const container = scrollContainerRef.current;
     if (!container || !onProgressChange) return;
 
     const handleScroll = () => {
-      // Clear previous timeout
       if (scrollTimeoutRef.current) {
         clearTimeout(scrollTimeoutRef.current);
       }
 
-      // Debounce: update after 1 second of no scrolling
       scrollTimeoutRef.current = setTimeout(() => {
         const scrollTop = container.scrollTop;
         const scrollHeight = container.scrollHeight - container.clientHeight;
@@ -277,16 +374,15 @@ export function EpubReader({
     };
   }, [currentChapterIndex, onProgressChange]);
 
-  // Restore scroll position after chapter loads
+  // Restore scroll position after initial chapter loads
   useEffect(() => {
     if (
       shouldRestoreScroll.current &&
       !hasRestoredScroll.current &&
-      !isLoadingChapter &&
-      currentChapter &&
+      !isLoadingMore &&
+      visibleChapterIndices.length > 0 &&
       scrollContainerRef.current
     ) {
-      // Small delay to ensure content is rendered
       const timeout = setTimeout(() => {
         const container = scrollContainerRef.current;
         if (container) {
@@ -298,7 +394,10 @@ export function EpubReader({
 
       return () => clearTimeout(timeout);
     }
-  }, [isLoadingChapter, currentChapter, initialScrollPosition]);
+  }, [isLoadingMore, visibleChapterIndices.length, initialScrollPosition]);
+
+  // Get current chapter for header display
+  const currentChapter = loadedChapters.get(currentChapterIndex);
 
   // Loading state
   if (isLoadingDoc) {
@@ -324,125 +423,151 @@ export function EpubReader({
   if (!document) return null;
 
   return (
-    <motion.div
-      className="flex flex-1 flex-col overflow-hidden bg-background"
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ duration: 0.2 }}
-    >
-      {/* Header */}
-      <div className="flex items-center justify-between border-b bg-background/80 px-4 py-2 backdrop-blur-sm">
-        <div className="flex items-center gap-2 min-w-0">
-          <BookOpen className="size-4 text-muted-foreground shrink-0" />
-          <span className="text-sm font-medium text-foreground truncate">
-            {document.title}
-          </span>
-          {currentChapter && (
-            <span className="text-xs text-muted-foreground truncate">
-              • {currentChapter.title}
+    <div className="flex h-full">
+      {/* Main reader area */}
+      <motion.div
+        className="flex flex-1 flex-col overflow-hidden bg-background"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.2 }}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between border-b bg-background/80 px-4 h-14 backdrop-blur-sm">
+          <div className="flex items-center gap-2 min-w-0">
+            <BookOpen className="size-4 text-muted-foreground shrink-0" />
+            <span className="text-sm font-medium text-foreground truncate">
+              {document.title}
             </span>
-          )}
+            {currentChapter && (
+              <span className="text-xs text-muted-foreground truncate">
+                • {currentChapter.title}
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-1">
+            {/* TOC Dropdown */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="sm" className="size-8 p-0">
+                  <List className="size-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-64 max-h-96 overflow-y-auto">
+                {outline.length > 0
+                  ? outline.map((item) => (
+                      <DropdownMenuItem
+                        key={item.id}
+                        onClick={() => goToChapter(item.pageIndex)}
+                        className={
+                          currentChapterIndex === item.pageIndex
+                            ? 'bg-accent'
+                            : ''
+                        }
+                      >
+                        <span className="truncate">{item.title}</span>
+                      </DropdownMenuItem>
+                    ))
+                  : chapters.map((ch) => (
+                      <DropdownMenuItem
+                        key={ch.id}
+                        onClick={() => goToChapter(ch.spineIndex)}
+                        className={
+                          currentChapterIndex === ch.spineIndex ? 'bg-accent' : ''
+                        }
+                      >
+                        <span className="truncate">{ch.title}</span>
+                      </DropdownMenuItem>
+                    ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            {/* Close button */}
+            <Button variant="ghost" size="sm" onClick={onClose} className="size-8 p-0">
+              <X className="size-4" />
+            </Button>
+          </div>
         </div>
 
-        <div className="flex items-center gap-1">
-          {/* TOC Dropdown */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm" className="size-8 p-0">
-                <List className="size-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-64 max-h-96 overflow-y-auto">
-              {outline.length > 0
-                ? outline.map((item) => (
-                    <DropdownMenuItem
-                      key={item.id}
-                      onClick={() => goToChapter(item.pageIndex)}
-                      className={
-                        currentChapterIndex === item.pageIndex
-                          ? 'bg-accent'
-                          : ''
-                      }
-                    >
-                      <span className="truncate">{item.title}</span>
-                    </DropdownMenuItem>
-                  ))
-                : chapters.map((ch) => (
-                    <DropdownMenuItem
-                      key={ch.id}
-                      onClick={() => goToChapter(ch.spineIndex)}
-                      className={
-                        currentChapterIndex === ch.spineIndex ? 'bg-accent' : ''
-                      }
-                    >
-                      <span className="truncate">{ch.title}</span>
-                    </DropdownMenuItem>
-                  ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
+        {/* Chapter Content - Infinite Scroll */}
+        <div ref={scrollContainerRef} className="flex-1 overflow-auto scrollbar-none">
+          <div className="w-full max-w-3xl mx-auto p-6">
+            {visibleChapterIndices.map((index) => {
+              const chapter = loadedChapters.get(index);
+              if (!chapter) return null;
 
-          {/* Close button */}
-          <Button variant="ghost" size="sm" onClick={onClose} className="size-8 p-0">
-            <X className="size-4" />
-          </Button>
-        </div>
-      </div>
+              const highlights = highlightsByChapter.get(index) || [];
 
-      {/* Chapter Content */}
-      <div ref={scrollContainerRef} className="flex flex-1 overflow-auto">
-        <div className="w-full max-w-3xl mx-auto p-6">
-          <AnimatePresence mode="wait">
-            {isLoadingChapter ? (
-              <motion.div
-                key="loading"
-                className="flex items-center justify-center py-12"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-              >
+              return (
+                <div
+                  key={chapter.id}
+                  ref={(el) => {
+                    if (el) chapterRefs.current.set(index, el);
+                    else chapterRefs.current.delete(index);
+                  }}
+                >
+                  <EpubChapter
+                    title={chapter.title}
+                    html={chapter.html}
+                    highlights={highlights}
+                    onCreateHighlight={(data) => handleCreateHighlight(index, data)}
+                    onAskAI={handleAskAI}
+                    onAddToNotes={handleAddToNotes}
+                  />
+                  {/* Chapter separator */}
+                  {index < chapters.length - 1 && (
+                    <div className="my-12 border-t border-border" />
+                  )}
+                </div>
+              );
+            })}
+
+            {/* Load more trigger */}
+            <div ref={loadMoreTriggerRef} className="h-px" />
+
+            {/* Loading indicator */}
+            {isLoadingMore && (
+              <div className="flex items-center justify-center py-8">
                 <Loader2 className="size-6 animate-spin text-muted-foreground" />
-              </motion.div>
-            ) : currentChapter ? (
-              <EpubChapter
-                key={currentChapter.id}
-                title={currentChapter.title}
-                html={currentChapter.html}
-                highlights={highlights}
-                onCreateHighlight={handleCreateHighlight}
-              />
-            ) : null}
-          </AnimatePresence>
+              </div>
+            )}
+
+            {/* End of book indicator */}
+            {visibleChapterIndices.length > 0 &&
+              visibleChapterIndices[visibleChapterIndices.length - 1] === chapters.length - 1 &&
+              !isLoadingMore && (
+                <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">
+                  End of book
+                </div>
+              )}
+          </div>
         </div>
-      </div>
+      </motion.div>
 
-      {/* Navigation Footer */}
-      <div className="flex items-center justify-between border-t bg-background/80 px-4 py-2 backdrop-blur-sm">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={goToPrevChapter}
-          disabled={currentChapterIndex === 0 || isLoadingChapter}
-        >
-          <ChevronLeft className="size-4 mr-1" />
-          Previous
-        </Button>
-
-        <span className="text-sm text-muted-foreground">
-          {currentChapterIndex + 1} / {chapters.length}
-        </span>
-
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={goToNextChapter}
-          disabled={
-            currentChapterIndex === chapters.length - 1 || isLoadingChapter
-          }
-        >
-          Next
-          <ChevronRight className="size-4 ml-1" />
-        </Button>
-      </div>
-    </motion.div>
+      {/* Side Panel */}
+      {isMobile ? (
+        <MobilePanel
+          open={panelOpen}
+          onOpenChange={setPanelOpen}
+          context={chatContext}
+          onClearContext={() => setChatContext('')}
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+          notes={notes}
+          onNotesChange={setNotes}
+        />
+      ) : (
+        <SidePanel
+          open={panelOpen}
+          onOpenChange={setPanelOpen}
+          context={chatContext}
+          onClearContext={() => setChatContext('')}
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+          notes={notes}
+          onNotesChange={setNotes}
+        />
+      )}
+    </div>
   );
 }
