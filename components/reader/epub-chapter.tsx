@@ -2,7 +2,7 @@
 
 import { useRef, useState, useCallback, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { HighlightPopover } from './highlight-popover';
+import { SelectionPopover } from './selection-popover';
 import { applyHighlights } from '@/lib/epub/apply-highlights';
 import type { HighlightRow, HighlightColor } from '@/lib/db/types';
 
@@ -25,6 +25,8 @@ interface EpubChapterProps {
     selectedText: string;
     color: HighlightColor;
   }) => Promise<void>;
+  onAskAI?: (selectedText: string) => void;
+  onAddToNotes?: (selectedText: string) => void;
 }
 
 /**
@@ -65,6 +67,8 @@ export function EpubChapter({
   className = '',
   highlights = [],
   onCreateHighlight,
+  onAskAI,
+  onAddToNotes,
 }: EpubChapterProps) {
   const contentRef = useRef<HTMLDivElement>(null);
   const pendingHighlightRef = useRef<PendingHighlight | null>(null);
@@ -243,6 +247,28 @@ export function EpubChapter({
     setPopoverData(null);
   }, [removePendingMark]);
 
+  const handleAskAI = useCallback(() => {
+    const pending = pendingHighlightRef.current;
+    if (!pending || !onAskAI) return;
+
+    const text = pending.text;
+    // Remove the pending mark since we're not highlighting
+    removePendingMark();
+    setPopoverData(null);
+    onAskAI(text);
+  }, [onAskAI, removePendingMark]);
+
+  const handleAddToNotes = useCallback(() => {
+    const pending = pendingHighlightRef.current;
+    if (!pending || !onAddToNotes) return;
+
+    const text = pending.text;
+    // Remove the pending mark since we're not highlighting
+    removePendingMark();
+    setPopoverData(null);
+    onAddToNotes(text);
+  }, [onAddToNotes, removePendingMark]);
+
   return (
     <motion.article
       className={`epub-chapter ${className}`}
@@ -274,10 +300,12 @@ export function EpubChapter({
         "
       />
 
-      {popoverData && onCreateHighlight && (
-        <HighlightPopover
+      {popoverData && (
+        <SelectionPopover
           position={popoverData}
           onSelectColor={handleSelectColor}
+          onAskAI={handleAskAI}
+          onAddToNotes={handleAddToNotes}
           onClose={handleClosePopover}
           isLoading={isCreatingHighlight}
         />
