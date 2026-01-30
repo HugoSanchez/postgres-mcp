@@ -20,7 +20,7 @@ import { EpubChapter } from './epub-chapter';
 import { SidePanel } from './side-panel';
 import { MobilePanel } from './mobile-panel';
 import { useIsMobile } from '@/hooks/use-mobile';
-import type { HighlightRow, HighlightColor } from '@/lib/db/types';
+import type { HighlightRow, HighlightColor, EpubHighlightAnchor, AnnotationRow } from '@/lib/db/types';
 
 interface ChapterMeta {
   id: string;
@@ -87,6 +87,9 @@ export function EpubReader({
   // Highlights state (per chapter)
   const [highlightsByChapter, setHighlightsByChapter] = useState<Map<number, HighlightRow[]>>(new Map());
 
+  // Annotations state (per chapter)
+  const [annotationsByChapter, setAnnotationsByChapter] = useState<Map<number, AnnotationRow[]>>(new Map());
+
   // Scroll tracking
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -100,7 +103,9 @@ export function EpubReader({
   const [panelOpen, setPanelOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'chat' | 'notes'>('chat');
   const [chatContext, setChatContext] = useState('');
+  const [chatContextAnchor, setChatContextAnchor] = useState<EpubHighlightAnchor | null>(null);
   const [notes, setNotes] = useState('');
+  const [seedMessages, setSeedMessages] = useState<{ question: string; answer: string } | null>(null);
 
   // Fetch document metadata and chapter list
   useEffect(() => {
@@ -151,6 +156,28 @@ export function EpubReader({
     [documentId]
   );
 
+  // Fetch annotations for a chapter
+  const fetchAnnotations = useCallback(
+    async (chapterIndex: number) => {
+      try {
+        const res = await fetch(
+          `/api/reader/annotations?documentId=${documentId}&chapterIndex=${chapterIndex}`
+        );
+        if (res.ok) {
+          const data = await res.json();
+          setAnnotationsByChapter(prev => {
+            const next = new Map(prev);
+            next.set(chapterIndex, data.annotations || []);
+            return next;
+          });
+        }
+      } catch (err) {
+        console.error('Failed to fetch annotations:', err);
+      }
+    },
+    [documentId]
+  );
+
   // Fetch chapter content
   const fetchChapter = useCallback(
     async (index: number): Promise<ChapterContent | null> => {
@@ -175,8 +202,9 @@ export function EpubReader({
           return next;
         });
 
-        // Fetch highlights for this chapter
+        // Fetch highlights and annotations for this chapter
         fetchHighlights(index);
+        fetchAnnotations(index);
 
         return chapter;
       } catch (err) {
@@ -184,7 +212,7 @@ export function EpubReader({
         return null;
       }
     },
-    [documentId, loadedChapters, fetchHighlights]
+    [documentId, loadedChapters, fetchHighlights, fetchAnnotations]
   );
 
   // Load initial chapter when document is loaded
@@ -331,8 +359,16 @@ export function EpubReader({
   );
 
   // Handle Ask AI action from selection
-  const handleAskAI = useCallback((selectedText: string) => {
-    setChatContext(selectedText);
+  const handleAskAI = useCallback((
+    chapterIndex: number,
+    data: { selectedText: string; startOffset: number; endOffset: number }
+  ) => {
+    setChatContext(data.selectedText);
+    setChatContextAnchor({
+      chapterIndex,
+      startOffset: data.startOffset,
+      endOffset: data.endOffset,
+    });
     setActiveTab('chat');
     setPanelOpen(true);
   }, []);
@@ -343,6 +379,16 @@ export function EpubReader({
     setNotes((prev) => (prev ? `${prev}${quotedText}` : quotedText));
     setActiveTab('notes');
     setPanelOpen(true);
+  }, []);
+
+  // Handle annotation click - seed the chat with the Q&A so user can continue conversation
+  const handleAnnotationClick = useCallback((annotation: AnnotationRow) => {
+    const content = annotation.content as { question?: string; answer?: string };
+    if (content.question && content.answer) {
+      setSeedMessages({ question: content.question, answer: content.answer });
+      setActiveTab('chat');
+      setPanelOpen(true);
+    }
   }, []);
 
   // Scroll tracking for progress (debounced)
@@ -497,6 +543,7 @@ export function EpubReader({
               if (!chapter) return null;
 
               const highlights = highlightsByChapter.get(index) || [];
+              const annotations = annotationsByChapter.get(index) || [];
 
               return (
                 <div
@@ -510,9 +557,11 @@ export function EpubReader({
                     title={chapter.title}
                     html={chapter.html}
                     highlights={highlights}
+                    annotations={annotations}
                     onCreateHighlight={(data) => handleCreateHighlight(index, data)}
-                    onAskAI={handleAskAI}
+                    onAskAI={(data) => handleAskAI(index, data)}
                     onAddToNotes={handleAddToNotes}
+                    onAnnotationClick={handleAnnotationClick}
                   />
                   {/* Chapter separator */}
                   {index < chapters.length - 1 && (
@@ -550,24 +599,40 @@ export function EpubReader({
           open={panelOpen}
           onOpenChange={setPanelOpen}
           context={chatContext}
-          onClearContext={() => setChatContext('')}
+          contextAnchor={chatContextAnchor}
+          onClearContext={() => {
+            setChatContext('');
+            setChatContextAnchor(null);
+          }}
           activeTab={activeTab}
           onTabChange={setActiveTab}
           notes={notes}
           onNotesChange={setNotes}
+          documentId={documentId}
           documentTitle={document?.title}
+          onAnnotationCreated={fetchAnnotations}
+          seedMessages={seedMessages}
+          onSeedMessagesConsumed={() => setSeedMessages(null)}
         />
       ) : (
         <SidePanel
           open={panelOpen}
           onOpenChange={setPanelOpen}
           context={chatContext}
-          onClearContext={() => setChatContext('')}
+          contextAnchor={chatContextAnchor}
+          onClearContext={() => {
+            setChatContext('');
+            setChatContextAnchor(null);
+          }}
           activeTab={activeTab}
           onTabChange={setActiveTab}
           notes={notes}
           onNotesChange={setNotes}
+          documentId={documentId}
           documentTitle={document?.title}
+          onAnnotationCreated={fetchAnnotations}
+          seedMessages={seedMessages}
+          onSeedMessagesConsumed={() => setSeedMessages(null)}
         />
       )}
     </div>

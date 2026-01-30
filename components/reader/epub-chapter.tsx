@@ -1,10 +1,18 @@
 'use client';
 
-import { useRef, useState, useCallback, useEffect, useMemo } from 'react';
+import { useRef, useState, useCallback, useEffect, useMemo, useLayoutEffect } from 'react';
 import { motion } from 'framer-motion';
+import { MessageSquareText, MessageCircle, Bookmark } from 'lucide-react';
 import { SelectionPopover } from './selection-popover';
-import { applyHighlights } from '@/lib/epub/apply-highlights';
-import type { HighlightRow, HighlightColor } from '@/lib/db/types';
+import { applyHighlightsAndAnnotations } from '@/lib/epub/apply-highlights';
+import type { HighlightRow, HighlightColor, AnnotationRow } from '@/lib/db/types';
+
+interface AnnotationMarker {
+  id: string;
+  type: string;
+  top: number;
+  annotation: AnnotationRow;
+}
 
 interface PendingHighlight {
   startOffset: number;
@@ -19,14 +27,16 @@ interface EpubChapterProps {
   html: string;
   className?: string;
   highlights?: HighlightRow[];
+  annotations?: AnnotationRow[];
   onCreateHighlight?: (data: {
     startOffset: number;
     endOffset: number;
     selectedText: string;
     color: HighlightColor;
   }) => Promise<void>;
-  onAskAI?: (selectedText: string) => void;
+  onAskAI?: (data: { selectedText: string; startOffset: number; endOffset: number }) => void;
   onAddToNotes?: (selectedText: string) => void;
+  onAnnotationClick?: (annotation: AnnotationRow) => void;
 }
 
 /**
@@ -66,22 +76,26 @@ export function EpubChapter({
   html,
   className = '',
   highlights = [],
+  annotations = [],
   onCreateHighlight,
   onAskAI,
   onAddToNotes,
+  onAnnotationClick,
 }: EpubChapterProps) {
   const contentRef = useRef<HTMLDivElement>(null);
+  const articleRef = useRef<HTMLElement>(null);
   const pendingHighlightRef = useRef<PendingHighlight | null>(null);
   const lastAppliedHtmlRef = useRef<string>('');
   const skipNextHtmlUpdateRef = useRef(false);
   const [popoverData, setPopoverData] = useState<{ x: number; y: number } | null>(null);
   const [isCreatingHighlight, setIsCreatingHighlight] = useState(false);
   const isSelectingRef = useRef(false);
+  const [annotationMarkers, setAnnotationMarkers] = useState<AnnotationMarker[]>([]);
 
-  // Pre-process HTML with highlights applied
+  // Pre-process HTML with highlights and annotations applied
   const htmlWithHighlights = useMemo(() => {
-    return applyHighlights(html, highlights);
-  }, [html, highlights]);
+    return applyHighlightsAndAnnotations(html, highlights, annotations);
+  }, [html, highlights, annotations]);
 
   // Set innerHTML manually to avoid React re-renders overwriting our DOM changes
   // Use a ref to track what we last applied, to avoid resetting when we have pending marks
@@ -97,6 +111,39 @@ export function EpubChapter({
       lastAppliedHtmlRef.current = htmlWithHighlights;
     }
   }, [htmlWithHighlights]);
+
+  // Calculate annotation marker positions after DOM updates
+  useLayoutEffect(() => {
+    const container = contentRef.current;
+    const article = articleRef.current;
+    if (!container || !article || annotations.length === 0) {
+      setAnnotationMarkers([]);
+      return;
+    }
+
+    // Wait a tick for DOM to be fully updated
+    requestAnimationFrame(() => {
+      const articleRect = article.getBoundingClientRect();
+      const markers: AnnotationMarker[] = [];
+
+      for (const annotation of annotations) {
+        const element = container.querySelector(`[data-annotation-id="${annotation.id}"]`);
+        if (element) {
+          const rect = element.getBoundingClientRect();
+          // Calculate top position relative to the article container
+          const top = rect.top - articleRect.top;
+          markers.push({
+            id: annotation.id,
+            type: annotation.type,
+            top,
+            annotation,
+          });
+        }
+      }
+
+      setAnnotationMarkers(markers);
+    });
+  }, [annotations, htmlWithHighlights]);
 
   // Remove pending highlight mark from DOM
   const removePendingMark = useCallback(() => {
@@ -208,6 +255,29 @@ export function EpubChapter({
     };
   }, [removePendingMark]);
 
+  // Handle clicks on annotation elements
+  useEffect(() => {
+    const container = contentRef.current;
+    if (!container || !onAnnotationClick) return;
+
+    const handleClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      const annotationElement = target.closest('[data-annotation-id]');
+      if (annotationElement) {
+        const annotationId = annotationElement.getAttribute('data-annotation-id');
+        const annotation = annotations.find(a => a.id === annotationId);
+        if (annotation) {
+          e.preventDefault();
+          e.stopPropagation();
+          onAnnotationClick(annotation);
+        }
+      }
+    };
+
+    container.addEventListener('click', handleClick);
+    return () => container.removeEventListener('click', handleClick);
+  }, [annotations, onAnnotationClick]);
+
   const handleSelectColor = useCallback(
     async (color: HighlightColor) => {
       const pending = pendingHighlightRef.current;
@@ -251,11 +321,11 @@ export function EpubChapter({
     const pending = pendingHighlightRef.current;
     if (!pending || !onAskAI) return;
 
-    const text = pending.text;
+    const { text, startOffset, endOffset } = pending;
     // Remove the pending mark since we're not highlighting
     removePendingMark();
     setPopoverData(null);
-    onAskAI(text);
+    onAskAI({ selectedText: text, startOffset, endOffset });
   }, [onAskAI, removePendingMark]);
 
   const handleAddToNotes = useCallback(() => {
@@ -269,9 +339,24 @@ export function EpubChapter({
     onAddToNotes(text);
   }, [onAddToNotes, removePendingMark]);
 
+  // Get icon component for annotation type
+  const getAnnotationIcon = (type: string) => {
+    switch (type) {
+      case 'qa':
+        return MessageSquareText;
+      case 'comment':
+        return MessageCircle;
+      case 'marker':
+        return Bookmark;
+      default:
+        return MessageSquareText;
+    }
+  };
+
   return (
     <motion.article
-      className={`epub-chapter ${className}`}
+      ref={articleRef}
+      className={`epub-chapter relative ${className}`}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.2 }}
@@ -299,6 +384,27 @@ export function EpubChapter({
           [&_table:not(:has(thead))_td]:whitespace-nowrap
         "
       />
+
+      {/* Annotation margin markers - only visible on larger screens with margin space */}
+      {annotationMarkers.length > 0 && (
+        <div className="hidden xl:block absolute top-0 -right-12 w-10 h-full pointer-events-none">
+          {annotationMarkers.map((marker) => {
+            const Icon = getAnnotationIcon(marker.type);
+            return (
+              <button
+                key={marker.id}
+                type="button"
+                onClick={() => onAnnotationClick?.(marker.annotation)}
+                className="absolute pointer-events-auto p-1.5 rounded-full bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400 hover:bg-orange-200 dark:hover:bg-orange-900/50 hover:scale-110 transition-all shadow-sm border border-orange-200 dark:border-orange-800"
+                style={{ top: marker.top - 4 }}
+                title={marker.type === 'qa' ? 'Q&A annotation' : marker.type === 'comment' ? 'Comment' : 'Marker'}
+              >
+                <Icon className="h-4 w-4" />
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {popoverData && (
         <SelectionPopover

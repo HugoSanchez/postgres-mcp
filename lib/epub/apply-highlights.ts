@@ -1,4 +1,4 @@
-import type { HighlightRow, EpubHighlightAnchor } from '@/lib/db/types';
+import type { HighlightRow, AnnotationRow, EpubHighlightAnchor } from '@/lib/db/types';
 
 /**
  * Apply highlights to chapter HTML by parsing it as DOM, applying highlights,
@@ -8,7 +8,19 @@ export function applyHighlights(
   html: string,
   highlights: HighlightRow[]
 ): string {
-  if (!highlights.length) return html;
+  return applyHighlightsAndAnnotations(html, highlights, []);
+}
+
+/**
+ * Apply both highlights and annotations to chapter HTML.
+ * Annotations are rendered with a distinctive style (dashed underline with icon).
+ */
+export function applyHighlightsAndAnnotations(
+  html: string,
+  highlights: HighlightRow[],
+  annotations: AnnotationRow[]
+): string {
+  if (!highlights.length && !annotations.length) return html;
 
   // Parse HTML into a DOM tree
   const parser = new DOMParser();
@@ -35,6 +47,27 @@ export function applyHighlights(
       }
     } catch (error) {
       console.warn('Failed to apply highlight:', error);
+    }
+  }
+
+  // Sort annotations by start offset (process in reverse to preserve positions)
+  const sortedAnnotations = [...annotations].sort((a, b) => {
+    const anchorA = a.anchor as EpubHighlightAnchor;
+    const anchorB = b.anchor as EpubHighlightAnchor;
+    return anchorB.startOffset - anchorA.startOffset;
+  });
+
+  // Apply each annotation
+  for (const annotation of sortedAnnotations) {
+    const anchor = annotation.anchor as EpubHighlightAnchor;
+
+    try {
+      const range = findRangeByOffset(container, anchor.startOffset, anchor.endOffset);
+      if (range) {
+        wrapRangeWithAnnotation(doc, range, annotation.type, annotation.id);
+      }
+    } catch (error) {
+      console.warn('Failed to apply annotation:', error);
     }
   }
 
@@ -210,6 +243,108 @@ function wrapRangeWithMark(
 
       mark.textContent = node.textContent;
       parent.replaceChild(mark, node);
+    }
+  }
+}
+
+/**
+ * Wrap a Range with annotation elements.
+ * Uses a span with distinctive styling instead of mark.
+ */
+function wrapRangeWithAnnotation(
+  doc: Document,
+  range: Range,
+  annotationType: string,
+  annotationId: string
+): void {
+  // If the range is within a single text node, use the simple approach
+  if (
+    range.startContainer === range.endContainer &&
+    range.startContainer.nodeType === Node.TEXT_NODE
+  ) {
+    const span = doc.createElement('span');
+    span.className = `annotation annotation-${annotationType}`;
+    span.setAttribute('data-annotation-id', annotationId);
+    range.surroundContents(span);
+    return;
+  }
+
+  // For ranges spanning multiple elements, wrap each text node individually
+  const textNodes: Array<{ node: Text; start: number; end: number }> = [];
+  const walker = doc.createTreeWalker(
+    range.commonAncestorContainer,
+    NodeFilter.SHOW_TEXT,
+    null
+  );
+
+  let node = walker.nextNode() as Text | null;
+  while (node) {
+    const nodeRange = doc.createRange();
+    nodeRange.selectNodeContents(node);
+
+    const startsBeforeEnd = range.compareBoundaryPoints(Range.START_TO_END, nodeRange) > 0;
+    const endsAfterStart = range.compareBoundaryPoints(Range.END_TO_START, nodeRange) < 0;
+
+    if (startsBeforeEnd && endsAfterStart) {
+      const nodeLength = node.textContent?.length || 0;
+      let start = 0;
+      let end = nodeLength;
+
+      if (node === range.startContainer) {
+        start = range.startOffset;
+      }
+      if (node === range.endContainer) {
+        end = range.endOffset;
+      }
+
+      if (start < end && end <= nodeLength) {
+        textNodes.push({ node, start, end });
+      }
+    }
+
+    node = walker.nextNode() as Text | null;
+  }
+
+  // Wrap each text node portion (process in reverse to preserve offsets)
+  for (let i = textNodes.length - 1; i >= 0; i--) {
+    const { node, start, end } = textNodes[i];
+    const nodeLength = node.textContent?.length || 0;
+
+    if (start >= end || start >= nodeLength) continue;
+
+    const span = doc.createElement('span');
+    span.className = `annotation annotation-${annotationType}`;
+    span.setAttribute('data-annotation-id', annotationId);
+
+    if (start > 0 || end < nodeLength) {
+      const textContent = node.textContent || '';
+      const beforeText = textContent.slice(0, start);
+      const annotationText = textContent.slice(start, end);
+      const afterText = textContent.slice(end);
+
+      const parent = node.parentNode;
+      if (!parent) continue;
+
+      const fragment = doc.createDocumentFragment();
+
+      if (beforeText) {
+        fragment.appendChild(doc.createTextNode(beforeText));
+      }
+
+      span.textContent = annotationText;
+      fragment.appendChild(span);
+
+      if (afterText) {
+        fragment.appendChild(doc.createTextNode(afterText));
+      }
+
+      parent.replaceChild(fragment, node);
+    } else {
+      const parent = node.parentNode;
+      if (!parent) continue;
+
+      span.textContent = node.textContent;
+      parent.replaceChild(span, node);
     }
   }
 }

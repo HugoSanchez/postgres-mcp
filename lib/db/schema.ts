@@ -261,6 +261,47 @@ export const highlight = pgTable(
 
 export type Highlight = InferSelectModel<typeof highlight>;
 
+export const annotation = pgTable(
+  'Annotation',
+  {
+    id: uuid('id').notNull().defaultRandom(),
+    documentId: uuid('documentId')
+      .notNull()
+      .references(() => document.id),
+    documentType: varchar('documentType', {
+      enum: ['epub', 'pdf', 'article'],
+    }).notNull(),
+    userId: uuid('userId')
+      .notNull()
+      .references(() => user.id),
+    anchor: jsonb('anchor').notNull(), // { chapterIndex, startOffset, endOffset }
+    selectedText: text('selectedText').notNull(),
+    type: varchar('type', {
+      enum: ['qa', 'comment', 'marker'],
+    }).notNull(),
+    content: jsonb('content').notNull(), // Structure varies by type
+    color: varchar('color', {
+      enum: ['orange', 'yellow', 'green', 'blue', 'pink', 'purple'],
+    })
+      .notNull()
+      .default('orange'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+    updatedAt: timestamp('updatedAt').notNull().defaultNow(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.id] }),
+    documentIdx: index('annotation_document_idx').on(table.documentId),
+    userIdx: index('annotation_user_idx').on(table.userId),
+    documentUserIdx: index('annotation_document_user_idx').on(
+      table.documentId,
+      table.userId
+    ),
+    typeIdx: index('annotation_type_idx').on(table.type),
+  })
+);
+
+export type Annotation = InferSelectModel<typeof annotation>;
+
 export const readingProgress = pgTable(
   'ReadingProgress',
   {

@@ -343,3 +343,47 @@
     background-color: rgb(88 28 135 / 0.6);
     color: inherit;
 }
+
+/* Annotation styles for pinned Q&A and other annotations */
+.annotation {
+    @apply cursor-pointer transition-colors relative;
+    text-decoration: underline;
+    text-decoration-style: dashed;
+    text-underline-offset: 3px;
+}
+
+.annotation-qa {
+    text-decoration-color: rgb(249 115 22 / 0.7);
+}
+
+.annotation-comment {
+    text-decoration-color: rgb(59 130 246 / 0.7);
+    text-decoration-style: dotted;
+}
+
+.annotation-marker {
+    text-decoration-color: rgb(234 179 8 / 0.7);
+    text-decoration-style: wavy;
+}
+
+.dark .annotation-qa {
+    text-decoration-color: rgb(251 146 60 / 0.8);
+}
+
+.dark .annotation-comment {
+    text-decoration-color: rgb(96 165 250 / 0.8);
+}
+
+.dark .annotation-marker {
+    text-decoration-color: rgb(250 204 21 / 0.8);
+}
+
+/* Hover state for annotations */
+.annotation:hover {
+    text-decoration-thickness: 2px;
+    background-color: rgb(249 115 22 / 0.1);
+}
+
+.dark .annotation:hover {
+    background-color: rgb(251 146 60 / 0.15);
+}

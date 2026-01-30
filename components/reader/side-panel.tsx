@@ -1,13 +1,15 @@
 "use client";
 
 import React from "react";
-import { useState, useRef, useEffect } from "react";
-import { X, Send, Sparkles, FileText, PanelRightClose, PanelRight } from "lucide-react";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { X, Send, Sparkles, FileText, PanelRightClose, PanelRight, Pin, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Notepad } from "./notepad";
 import { cn } from "@/lib/utils";
+import { Markdown } from "@/components/markdown";
+import type { EpubHighlightAnchor } from "@/lib/db/types";
 
 interface Message {
   id: string;
@@ -15,37 +17,65 @@ interface Message {
   content: string;
 }
 
+// Track Q&A pairs that can be saved as annotations
+interface SaveableQA {
+  question: string;
+  answer: string;
+  anchor: EpubHighlightAnchor;
+  selectedText: string;
+}
+
+interface SeedMessages {
+  question: string;
+  answer: string;
+}
+
 interface SidePanelProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   context: string;
+  contextAnchor: EpubHighlightAnchor | null;
   onClearContext: () => void;
   activeTab: "chat" | "notes";
   onTabChange: (tab: "chat" | "notes") => void;
   notes: string;
   onNotesChange: (notes: string) => void;
+  documentId: string;
   documentTitle?: string;
+  onAnnotationCreated?: (chapterIndex: number) => void;
+  seedMessages?: SeedMessages | null;
+  onSeedMessagesConsumed?: () => void;
 }
 
 export function SidePanel({
   open,
   onOpenChange,
   context,
+  contextAnchor,
   onClearContext,
   activeTab,
   onTabChange,
   notes,
   onNotesChange,
+  documentId,
   documentTitle,
+  onAnnotationCreated,
+  seedMessages,
+  onSeedMessagesConsumed,
 }: SidePanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [width, setWidth] = useState(400);
   const [isResizing, setIsResizing] = useState(false);
+  const [savingMessageId, setSavingMessageId] = useState<string | null>(null);
+  const [savedMessageIds, setSavedMessageIds] = useState<Set<string>>(new Set());
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+
+  // Track saveable Q&A pairs (keyed by assistant message id)
+  const saveableQAsRef = useRef<Map<string, SaveableQA>>(new Map());
 
   const minWidth = 320;
   const maxWidth = 600;
@@ -88,6 +118,18 @@ export function SidePanel({
     }
   }, [open, context, input, activeTab]);
 
+  // Seed chat with messages from annotation click
+  useEffect(() => {
+    if (seedMessages) {
+      const timestamp = Date.now();
+      setMessages([
+        { id: `${timestamp}-q`, role: "user", content: seedMessages.question },
+        { id: `${timestamp}-a`, role: "assistant", content: seedMessages.answer },
+      ]);
+      onSeedMessagesConsumed?.();
+    }
+  }, [seedMessages, onSeedMessagesConsumed]);
+
   // Scroll to bottom when new messages arrive
   useEffect(() => {
     if (scrollRef.current) {
@@ -106,9 +148,13 @@ export function SidePanel({
 
     const updatedMessages = [...messages, userMessage];
     setMessages(updatedMessages);
+    const questionText = input.trim();
     setInput("");
     setIsTyping(true);
+
+    // Capture anchor and context before clearing
     const currentContext = context;
+    const currentAnchor = contextAnchor;
     onClearContext();
 
     try {
@@ -168,6 +214,16 @@ export function SidePanel({
           }
         }
       }
+
+      // After response complete, store saveable Q&A if we have anchor data
+      if (currentAnchor && currentContext && accumulatedContent) {
+        saveableQAsRef.current.set(assistantMessageId, {
+          question: questionText,
+          answer: accumulatedContent,
+          anchor: currentAnchor,
+          selectedText: currentContext,
+        });
+      }
     } catch (error) {
       console.error('Chat error:', error);
       const errorMessage: Message = {
@@ -187,6 +243,47 @@ export function SidePanel({
       handleSend();
     }
   };
+
+  const handleSave = useCallback(async (messageId: string) => {
+    const qa = saveableQAsRef.current.get(messageId);
+    if (!qa) return;
+
+    setSavingMessageId(messageId);
+    try {
+      const response = await fetch('/api/reader/annotations', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          documentId,
+          documentType: 'epub',
+          anchor: qa.anchor,
+          selectedText: qa.selectedText,
+          type: 'qa',
+          content: {
+            question: qa.question,
+            answer: qa.answer,
+          },
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to save annotation');
+      }
+
+      setSavedMessageIds(prev => new Set([...prev, messageId]));
+      // Remove from saveable map since it's now saved
+      saveableQAsRef.current.delete(messageId);
+
+      // Notify parent to refresh annotations for this chapter
+      onAnnotationCreated?.(qa.anchor.chapterIndex);
+    } catch (error) {
+      console.error('Failed to save annotation:', error);
+    } finally {
+      setSavingMessageId(null);
+    }
+  }, [documentId, onAnnotationCreated]);
 
   return (
     <div className="flex h-screen relative">
@@ -279,8 +376,8 @@ export function SidePanel({
                       <div
                         key={message.id}
                         className={cn(
-                          "flex",
-                          message.role === "user" ? "justify-end" : "justify-start"
+                          "flex flex-col",
+                          message.role === "user" ? "items-end" : "items-start"
                         )}
                       >
                         <div
@@ -288,11 +385,36 @@ export function SidePanel({
                             "max-w-[85%] rounded-2xl px-4 py-2.5 text-sm",
                             message.role === "user"
                               ? "bg-accent text-accent-foreground"
-                              : "text-foreground"
+                              : "text-foreground prose prose-sm dark:prose-invert prose-p:my-2 prose-ul:my-2 prose-ol:my-2"
                           )}
                         >
-                          {message.content}
+                          {message.role === "assistant" ? (
+                            <Markdown>{message.content}</Markdown>
+                          ) : (
+                            message.content
+                          )}
                         </div>
+                        {message.role === "assistant" && saveableQAsRef.current.has(message.id) && !savedMessageIds.has(message.id) && (
+                          <button
+                            type="button"
+                            onClick={() => handleSave(message.id)}
+                            disabled={savingMessageId === message.id}
+                            className="mt-1.5 flex items-center gap-1 px-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                          >
+                            {savingMessageId === message.id ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : (
+                              <Pin className="h-3 w-3" />
+                            )}
+                            {savingMessageId === message.id ? "Saving..." : "Pin to text"}
+                          </button>
+                        )}
+                        {message.role === "assistant" && savedMessageIds.has(message.id) && (
+                          <span className="mt-1.5 flex items-center gap-1 px-2 py-1 text-xs text-green-600 dark:text-green-400">
+                            <Pin className="h-3 w-3" />
+                            Pinned
+                          </span>
+                        )}
                       </div>
                     ))}
                     {isTyping && (
