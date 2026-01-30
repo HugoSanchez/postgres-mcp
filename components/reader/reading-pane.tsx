@@ -104,7 +104,7 @@ export function ReadingPane() {
       const formData = new FormData();
       formData.append('file', file);
 
-      const res = await fetch('/api/upload/epub', {
+      const res = await fetch('/api/documents/upload/epub', {
         method: 'POST',
         body: formData,
       });

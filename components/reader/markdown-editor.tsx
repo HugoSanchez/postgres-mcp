@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useCallback } from "react";
-import { EditorState } from "prosemirror-state";
+import { EditorState, TextSelection } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
 import { schema, defaultMarkdownParser, defaultMarkdownSerializer } from "prosemirror-markdown";
 import { inputRules, wrappingInputRule, textblockTypeInputRule, InputRule } from "prosemirror-inputrules";
 import { keymap } from "prosemirror-keymap";
-import { baseKeymap, toggleMark } from "prosemirror-commands";
+import { baseKeymap, toggleMark, chainCommands, newlineInCode, createParagraphNear, liftEmptyBlock, splitBlock } from "prosemirror-commands";
 import { history, undo, redo } from "prosemirror-history";
 
 interface MarkdownEditorProps {
@@ -67,6 +67,88 @@ function buildInputRules() {
   return inputRules({ rules });
 }
 
+// Custom command: When pressing Enter at end of heading, create a paragraph instead of another heading
+function exitHeadingOnEnter(state: EditorState, dispatch?: (tr: any) => void): boolean {
+  const { $from, empty } = state.selection;
+
+  if (!empty) return false;
+
+  const parent = $from.parent;
+  if (parent.type.name !== "heading") return false;
+
+  // Check if at the end of the heading
+  if ($from.parentOffset !== parent.content.size) return false;
+
+  if (dispatch) {
+    const tr = state.tr;
+    const paragraph = schema.nodes.paragraph.create();
+    const insertPos = $from.after();
+    tr.insert(insertPos, paragraph);
+    tr.setSelection(TextSelection.near(tr.doc.resolve(insertPos + 1)));
+    dispatch(tr.scrollIntoView());
+  }
+  return true;
+}
+
+// Custom command: When pressing Backspace at start of heading, convert to paragraph
+function headingBackspaceToParagraph(state: EditorState, dispatch?: (tr: any) => void): boolean {
+  const { $cursor } = state.selection as TextSelection;
+
+  if (!$cursor) return false;
+
+  // Must be at the start of the text block
+  if ($cursor.parentOffset !== 0) return false;
+
+  const parent = $cursor.parent;
+  if (parent.type.name !== "heading") return false;
+
+  if (dispatch) {
+    const tr = state.tr.setBlockType($cursor.before(), $cursor.after(), schema.nodes.paragraph);
+    dispatch(tr.scrollIntoView());
+  }
+  return true;
+}
+
+// Custom command: Backspace on empty block converts to paragraph or lifts
+function backspaceEmptyBlock(state: EditorState, dispatch?: (tr: any) => void): boolean {
+  const { $cursor } = state.selection as TextSelection;
+
+  if (!$cursor) return false;
+  if ($cursor.parentOffset !== 0) return false;
+
+  const parent = $cursor.parent;
+
+  // If empty heading, blockquote, or code block, convert to paragraph
+  if (parent.content.size === 0 && parent.type.name !== "paragraph") {
+    if (dispatch) {
+      const tr = state.tr.setBlockType($cursor.before(), $cursor.after(), schema.nodes.paragraph);
+      dispatch(tr.scrollIntoView());
+    }
+    return true;
+  }
+
+  return false;
+}
+
+// Custom Enter handler that chains our heading exit with normal behavior
+function buildEnterKeymap() {
+  return chainCommands(
+    exitHeadingOnEnter,
+    newlineInCode,
+    createParagraphNear,
+    liftEmptyBlock,
+    splitBlock
+  );
+}
+
+// Custom Backspace handler
+function buildBackspaceKeymap() {
+  return chainCommands(
+    backspaceEmptyBlock,
+    headingBackspaceToParagraph
+  );
+}
+
 export function MarkdownEditor({ content, onContentChange, placeholder = "Start writing..." }: MarkdownEditorProps) {
   const editorRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -99,6 +181,8 @@ export function MarkdownEditor({ content, onContentChange, placeholder = "Start 
           "Mod-b": toggleMark(schema.marks.strong),
           "Mod-i": toggleMark(schema.marks.em),
           "Mod-`": toggleMark(schema.marks.code),
+          "Enter": buildEnterKeymap(),
+          "Backspace": chainCommands(buildBackspaceKeymap(), baseKeymap["Backspace"]),
         }),
         keymap(baseKeymap),
         history(),

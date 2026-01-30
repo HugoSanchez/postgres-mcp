@@ -22,7 +22,7 @@ export function SidebarReadingProgress() {
   useEffect(() => {
     async function fetchRecentReading() {
       try {
-        const res = await fetch('/api/reading-progress/recent?limit=3');
+        const res = await fetch('/api/reader/progress/recent?limit=3');
         if (res.ok) {
           const data = await res.json();
           setItems(data.items || []);

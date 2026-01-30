@@ -63,7 +63,7 @@ export function MobilePanel({
     }
   }, [messages]);
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (!input.trim()) return;
 
     const userMessage: Message = {
@@ -72,21 +72,81 @@ export function MobilePanel({
       content: input.trim(),
     };
 
-    setMessages((prev) => [...prev, userMessage]);
+    const updatedMessages = [...messages, userMessage];
+    setMessages(updatedMessages);
     setInput("");
     setIsTyping(true);
+    const currentContext = context;
     onClearContext();
 
-    // Simulate AI response
-    setTimeout(() => {
-      const assistantMessage: Message = {
+    try {
+      const response = await fetch('/api/reader/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messages: updatedMessages.map(m => ({
+            role: m.role,
+            content: m.content,
+          })),
+          documentTitle,
+          context: currentContext,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to get response');
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('No reader available');
+      }
+
+      const assistantMessageId = (Date.now() + 1).toString();
+      setMessages((prev) => [...prev, { id: assistantMessageId, role: "assistant", content: "" }]);
+
+      const decoder = new TextDecoder();
+      let accumulatedContent = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        // Parse the data stream format from AI SDK
+        const lines = chunk.split('\n');
+        for (const line of lines) {
+          if (line.startsWith('0:')) {
+            // Text chunk - parse the JSON string
+            try {
+              const textContent = JSON.parse(line.slice(2));
+              accumulatedContent += textContent;
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantMessageId
+                    ? { ...m, content: accumulatedContent }
+                    : m
+                )
+              );
+            } catch {
+              // Skip malformed chunks
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Chat error:', error);
+      const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: "assistant",
-        content: generateMockResponse(userMessage.content),
+        content: "Sorry, I encountered an error. Please try again.",
       };
-      setMessages((prev) => [...prev, assistantMessage]);
+      setMessages((prev) => [...prev, errorMessage]);
+    } finally {
       setIsTyping(false);
-    }, 1200);
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -173,7 +233,7 @@ export function MobilePanel({
                         "max-w-[85%] rounded-2xl px-3 py-2 text-sm",
                         message.role === "user"
                           ? "bg-accent text-accent-foreground"
-                          : "bg-secondary text-secondary-foreground"
+                          : "text-foreground"
                       )}
                     >
                       {message.content}
@@ -182,7 +242,7 @@ export function MobilePanel({
                 ))}
                 {isTyping && (
                   <div className="flex justify-start">
-                    <div className="bg-secondary rounded-2xl px-3 py-2.5">
+                    <div className="rounded-2xl px-3 py-2.5">
                       <div className="flex gap-1">
                         <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground animate-pulse" />
                         <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground animate-pulse [animation-delay:150ms]" />
@@ -241,11 +301,3 @@ export function MobilePanel({
   );
 }
 
-function generateMockResponse(question: string): string {
-  const responses = [
-    "This passage reflects Woolf's belief in the deeply personal nature of reading. She argues that reading should be an act of freedom, unconstrained by external authorities.",
-    "Woolf uses the metaphor of the library as a 'sanctuary' to emphasize that reading is one of the few areas where we can be truly free from social conventions.",
-    "The phrase illustrates Woolf's point about objective facts versus subjective value judgments. Historical events can be verified, but artistic merit is personal.",
-  ];
-  return responses[Math.floor(Math.random() * responses.length)];
-}

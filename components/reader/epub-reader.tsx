@@ -109,7 +109,7 @@ export function EpubReader({
       setError(null);
 
       try {
-        const res = await fetch(`/api/epub/${documentId}`);
+        const res = await fetch(`/api/reader/epub/${documentId}`);
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
           throw new Error(body.error || 'Failed to load document');
@@ -134,7 +134,7 @@ export function EpubReader({
     async (chapterIndex: number) => {
       try {
         const res = await fetch(
-          `/api/highlights?documentId=${documentId}&chapterIndex=${chapterIndex}`
+          `/api/reader/highlights?documentId=${documentId}&chapterIndex=${chapterIndex}`
         );
         if (res.ok) {
           const data = await res.json();
@@ -159,7 +159,7 @@ export function EpubReader({
       if (cached) return cached;
 
       try {
-        const res = await fetch(`/api/epub/${documentId}?chapter=${index}`);
+        const res = await fetch(`/api/reader/epub/${documentId}?chapter=${index}`);
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
           throw new Error(body.error || 'Failed to load chapter');
@@ -304,7 +304,7 @@ export function EpubReader({
       selectedText: string;
       color: HighlightColor;
     }) => {
-      const res = await fetch('/api/highlights', {
+      const res = await fetch('/api/reader/highlights', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

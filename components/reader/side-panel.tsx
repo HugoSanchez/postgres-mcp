@@ -95,7 +95,7 @@ export function SidePanel({
     }
   }, [messages]);
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (!input.trim()) return;
 
     const userMessage: Message = {
@@ -104,21 +104,81 @@ export function SidePanel({
       content: input.trim(),
     };
 
-    setMessages((prev) => [...prev, userMessage]);
+    const updatedMessages = [...messages, userMessage];
+    setMessages(updatedMessages);
     setInput("");
     setIsTyping(true);
+    const currentContext = context;
     onClearContext();
 
-    // Simulate AI response
-    setTimeout(() => {
-      const assistantMessage: Message = {
+    try {
+      const response = await fetch('/api/reader/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messages: updatedMessages.map(m => ({
+            role: m.role,
+            content: m.content,
+          })),
+          documentTitle,
+          context: currentContext,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to get response');
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('No reader available');
+      }
+
+      const assistantMessageId = (Date.now() + 1).toString();
+      setMessages((prev) => [...prev, { id: assistantMessageId, role: "assistant", content: "" }]);
+
+      const decoder = new TextDecoder();
+      let accumulatedContent = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        // Parse the data stream format from AI SDK
+        const lines = chunk.split('\n');
+        for (const line of lines) {
+          if (line.startsWith('0:')) {
+            // Text chunk - parse the JSON string
+            try {
+              const textContent = JSON.parse(line.slice(2));
+              accumulatedContent += textContent;
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantMessageId
+                    ? { ...m, content: accumulatedContent }
+                    : m
+                )
+              );
+            } catch {
+              // Skip malformed chunks
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Chat error:', error);
+      const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: "assistant",
-        content: generateMockResponse(userMessage.content),
+        content: "Sorry, I encountered an error. Please try again.",
       };
-      setMessages((prev) => [...prev, assistantMessage]);
+      setMessages((prev) => [...prev, errorMessage]);
+    } finally {
       setIsTyping(false);
-    }, 1200);
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -130,7 +190,7 @@ export function SidePanel({
 
   return (
     <div className="flex h-screen relative">
-      {/* Toggle handle - always visible, positioned below header */}
+      {/* Toggle handle - always visible, positioned on left edge */}
       <button
         type="button"
         onClick={() => onOpenChange(!open)}
@@ -174,134 +234,124 @@ export function SidePanel({
           )}
         />
 
-      <div className={cn(
-        "flex flex-col h-full",
-        !isResizing && "transition-transform duration-300 ease-out",
-        open ? "translate-x-0" : "translate-x-full"
-      )}
-      style={{ minWidth: width }}
-      >
-        {/* Header with tabs */}
-        <div className="px-4 h-14 flex items-center border-b border-border shrink-0">
-          <Tabs value={activeTab} onValueChange={(v) => onTabChange(v as "chat" | "notes")} className="w-full">
-            <TabsList className="w-full bg-secondary">
-              <TabsTrigger value="chat" className="flex-1 gap-2 data-[state=active]:bg-card">
-                <Sparkles className="h-4 w-4" />
-                Chat
-              </TabsTrigger>
-              <TabsTrigger value="notes" className="flex-1 gap-2 data-[state=active]:bg-card">
-                <FileText className="h-4 w-4" />
-                Notes
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
-        </div>
+        <div className={cn(
+          "flex flex-col h-full",
+          !isResizing && "transition-transform duration-300 ease-out",
+          open ? "translate-x-0" : "translate-x-full"
+        )}
+        style={{ minWidth: width }}
+        >
+          {/* Header with tabs */}
+          <div className="px-4 h-14 flex items-center border-b border-border shrink-0">
+            <Tabs value={activeTab} onValueChange={(v) => onTabChange(v as "chat" | "notes")} className="w-full">
+              <TabsList className="w-full bg-secondary">
+                <TabsTrigger value="chat" className="flex-1 gap-2 data-[state=active]:bg-card">
+                  <Sparkles className="h-4 w-4" />
+                  Chat
+                </TabsTrigger>
+                <TabsTrigger value="notes" className="flex-1 gap-2 data-[state=active]:bg-card">
+                  <FileText className="h-4 w-4" />
+                  Notes
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+          </div>
 
-        {/* Content */}
-        {activeTab === "chat" ? (
-          <>
-            {/* Messages area */}
-            <ScrollArea className="flex-1 p-4" ref={scrollRef}>
-              {messages.length === 0 ? (
-                <div className="h-full flex flex-col items-start justify-center px-6 py-12">
-                  <h3 className="text-2xl font-semibold text-foreground mb-2">
-                    Hey there!
-                  </h3>
-                  <p className="text-xl text-muted-foreground">
-                    {documentTitle
-                      ? `I see you are reading ${documentTitle}, what can I help you with?`
-                      : 'What can I help you with?'}
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {messages.map((message) => (
-                    <div
-                      key={message.id}
-                      className={cn(
-                        "flex",
-                        message.role === "user" ? "justify-end" : "justify-start"
-                      )}
-                    >
+          {/* Content */}
+          {activeTab === "chat" ? (
+            <>
+              {/* Messages area */}
+              <ScrollArea className="flex-1 p-4" ref={scrollRef}>
+                {messages.length === 0 ? (
+                  <div className="h-full flex flex-col items-start justify-center px-6 py-12">
+                    <h3 className="text-2xl font-semibold text-foreground mb-2">
+                      Hey there!
+                    </h3>
+                    <p className="text-xl text-muted-foreground">
+                      {documentTitle
+                        ? `I see you are reading ${documentTitle}, what can I help you with?`
+                        : 'What can I help you with?'}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {messages.map((message) => (
                       <div
+                        key={message.id}
                         className={cn(
-                          "max-w-[85%] rounded-2xl px-4 py-2.5 text-sm",
-                          message.role === "user"
-                            ? "bg-accent text-accent-foreground"
-                            : "bg-secondary text-secondary-foreground"
+                          "flex",
+                          message.role === "user" ? "justify-end" : "justify-start"
                         )}
                       >
-                        {message.content}
-                      </div>
-                    </div>
-                  ))}
-                  {isTyping && (
-                    <div className="flex justify-start">
-                      <div className="bg-secondary rounded-2xl px-4 py-3">
-                        <div className="flex gap-1">
-                          <span className="h-2 w-2 rounded-full bg-muted-foreground animate-pulse" />
-                          <span className="h-2 w-2 rounded-full bg-muted-foreground animate-pulse [animation-delay:150ms]" />
-                          <span className="h-2 w-2 rounded-full bg-muted-foreground animate-pulse [animation-delay:300ms]" />
+                        <div
+                          className={cn(
+                            "max-w-[85%] rounded-2xl px-4 py-2.5 text-sm",
+                            message.role === "user"
+                              ? "bg-accent text-accent-foreground"
+                              : "text-foreground"
+                          )}
+                        >
+                          {message.content}
                         </div>
                       </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </ScrollArea>
+                    ))}
+                    {isTyping && (
+                      <div className="flex justify-start">
+                        <div className="rounded-2xl px-4 py-3">
+                          <div className="flex gap-1">
+                            <span className="h-2 w-2 rounded-full bg-muted-foreground animate-pulse" />
+                            <span className="h-2 w-2 rounded-full bg-muted-foreground animate-pulse [animation-delay:150ms]" />
+                            <span className="h-2 w-2 rounded-full bg-muted-foreground animate-pulse [animation-delay:300ms]" />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </ScrollArea>
 
-            {/* Input area */}
-            <div className="p-4 border-t border-border shrink-0">
-              {context && (
-                <div className="mb-3 inline-flex items-center gap-1.5 px-2 py-1 bg-neutral-700 dark:bg-neutral-300 rounded-md">
-                  <span className="text-xs text-neutral-300 dark:text-neutral-600">
-                    Selection · {context.split(/\s+/).length} words
-                  </span>
-                  <button
-                    type="button"
-                    onClick={onClearContext}
-                    className="text-neutral-400 hover:text-neutral-200 dark:text-neutral-500 dark:hover:text-neutral-700"
+              {/* Input area */}
+              <div className="p-4 border-t border-border shrink-0">
+                {context && (
+                  <div className="mb-3 inline-flex items-center gap-1.5 px-2 py-1 bg-neutral-700 dark:bg-neutral-300 rounded-md">
+                    <span className="text-xs text-neutral-300 dark:text-neutral-600">
+                      Selection · {context.split(/\s+/).length} words
+                    </span>
+                    <button
+                      type="button"
+                      onClick={onClearContext}
+                      className="text-neutral-400 hover:text-neutral-200 dark:text-neutral-500 dark:hover:text-neutral-700"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                )}
+                <div className="flex gap-2 items-end">
+                  <textarea
+                    ref={inputRef}
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    placeholder="Ask about the text..."
+                    className="flex-1 resize-none bg-neutral-50 dark:bg-neutral-900 rounded-xl px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none min-h-[100px] max-h-[200px] scrollbar-none"
+                    rows={3}
+                  />
+                  <Button
+                    size="icon"
+                    onClick={handleSend}
+                    disabled={!input.trim() || isTyping}
+                    className="h-10 w-10 rounded-xl bg-neutral-800 text-neutral-100 hover:bg-neutral-700 dark:bg-neutral-200 dark:text-neutral-800 dark:hover:bg-neutral-300 shrink-0"
                   >
-                    <X className="h-3 w-3" />
-                  </button>
+                    <Send className="h-4 w-4" />
+                  </Button>
                 </div>
-              )}
-              <div className="flex gap-2 items-end">
-                <textarea
-                  ref={inputRef}
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder="Ask about the text..."
-                  className="flex-1 resize-none bg-neutral-50 dark:bg-neutral-900 rounded-xl px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none min-h-[100px] max-h-[200px] scrollbar-none"
-                  rows={3}
-                />
-                <Button
-                  size="icon"
-                  onClick={handleSend}
-                  disabled={!input.trim() || isTyping}
-                  className="h-10 w-10 rounded-xl bg-neutral-800 text-neutral-100 hover:bg-neutral-700 dark:bg-neutral-200 dark:text-neutral-800 dark:hover:bg-neutral-300 shrink-0"
-                >
-                  <Send className="h-4 w-4" />
-                </Button>
               </div>
-            </div>
-          </>
-        ) : (
-          <Notepad content={notes} onContentChange={onNotesChange} />
-        )}
-      </div>
+            </>
+          ) : (
+            <Notepad content={notes} onContentChange={onNotesChange} />
+          )}
+        </div>
       </div>
     </div>
   );
-}
-
-function generateMockResponse(question: string): string {
-  const responses = [
-    "This passage reflects Woolf's belief in the deeply personal nature of reading. She argues that reading should be an act of freedom, unconstrained by external authorities or prescribed methods. The reader must trust their own judgment and form their own interpretations.",
-    "Woolf uses the metaphor of the library as a 'sanctuary' to emphasize that reading is one of the few areas of life where we can be truly free from social conventions. This freedom, however, requires discipline and focus to be meaningful.",
-    "The phrase 'battle of Waterloo' versus the comparison of Shakespeare's plays illustrates Woolf's point about objective facts versus subjective value judgments. Historical events can be verified, but artistic merit is ultimately personal.",
-    "Woolf's warning against 'squandering our powers' suggests that effective reading requires intention and focus. We must choose what to read carefully and engage deeply, rather than skim superficially across many texts.",
-  ];
-  return responses[Math.floor(Math.random() * responses.length)];
 }

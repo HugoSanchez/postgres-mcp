@@ -57,7 +57,7 @@ export function Chat({
   });
 
   const { data: votes } = useSWR<Array<Vote>>(
-    messages.length >= 2 ? `/api/vote?chatId=${id}` : null,
+    messages.length >= 2 ? `/api/chat/vote?chatId=${id}` : null,
     fetcher,
   );
 
