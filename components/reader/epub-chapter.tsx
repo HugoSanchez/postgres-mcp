@@ -2,7 +2,7 @@
 
 import { useRef, useState, useCallback, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { HighlightPopover } from './highlight-popover';
+import { SelectionPopover } from './selection-popover';
 import { applyHighlights } from '@/lib/epub/apply-highlights';
 import type { HighlightRow, HighlightColor } from '@/lib/db/types';
 
@@ -25,6 +25,8 @@ interface EpubChapterProps {
     selectedText: string;
     color: HighlightColor;
   }) => Promise<void>;
+  onAskAI?: (selectedText: string) => void;
+  onAddToNotes?: (selectedText: string) => void;
 }
 
 /**
@@ -65,10 +67,13 @@ export function EpubChapter({
   className = '',
   highlights = [],
   onCreateHighlight,
+  onAskAI,
+  onAddToNotes,
 }: EpubChapterProps) {
   const contentRef = useRef<HTMLDivElement>(null);
   const pendingHighlightRef = useRef<PendingHighlight | null>(null);
   const lastAppliedHtmlRef = useRef<string>('');
+  const skipNextHtmlUpdateRef = useRef(false);
   const [popoverData, setPopoverData] = useState<{ x: number; y: number } | null>(null);
   const [isCreatingHighlight, setIsCreatingHighlight] = useState(false);
   const isSelectingRef = useRef(false);
@@ -82,6 +87,12 @@ export function EpubChapter({
   // Use a ref to track what we last applied, to avoid resetting when we have pending marks
   useEffect(() => {
     if (contentRef.current && htmlWithHighlights !== lastAppliedHtmlRef.current) {
+      // Skip the update if we just created a highlight (DOM already has correct visual)
+      if (skipNextHtmlUpdateRef.current) {
+        skipNextHtmlUpdateRef.current = false;
+        lastAppliedHtmlRef.current = htmlWithHighlights;
+        return;
+      }
       contentRef.current.innerHTML = htmlWithHighlights;
       lastAppliedHtmlRef.current = htmlWithHighlights;
     }
@@ -214,6 +225,8 @@ export function EpubChapter({
           color,
         });
 
+        // Skip the next HTML update since DOM already has the correct visual
+        skipNextHtmlUpdateRef.current = true;
         // Clear pending (the real highlight will come from re-fetch)
         pendingHighlightRef.current = null;
         setPopoverData(null);
@@ -233,6 +246,28 @@ export function EpubChapter({
     removePendingMark();
     setPopoverData(null);
   }, [removePendingMark]);
+
+  const handleAskAI = useCallback(() => {
+    const pending = pendingHighlightRef.current;
+    if (!pending || !onAskAI) return;
+
+    const text = pending.text;
+    // Remove the pending mark since we're not highlighting
+    removePendingMark();
+    setPopoverData(null);
+    onAskAI(text);
+  }, [onAskAI, removePendingMark]);
+
+  const handleAddToNotes = useCallback(() => {
+    const pending = pendingHighlightRef.current;
+    if (!pending || !onAddToNotes) return;
+
+    const text = pending.text;
+    // Remove the pending mark since we're not highlighting
+    removePendingMark();
+    setPopoverData(null);
+    onAddToNotes(text);
+  }, [onAddToNotes, removePendingMark]);
 
   return (
     <motion.article
@@ -265,10 +300,12 @@ export function EpubChapter({
         "
       />
 
-      {popoverData && onCreateHighlight && (
-        <HighlightPopover
+      {popoverData && (
+        <SelectionPopover
           position={popoverData}
           onSelectColor={handleSelectColor}
+          onAskAI={handleAskAI}
+          onAddToNotes={handleAddToNotes}
           onClose={handleClosePopover}
           isLoading={isCreatingHighlight}
         />

@@ -2,7 +2,7 @@ import { config } from 'dotenv';
 config({ path: '.env.local' });
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import { document, epubChapter, documentOutline } from '../lib/db/schema';
+import { document, epubChapter, documentOutline, highlight } from '../lib/db/schema';
 import { eq } from 'drizzle-orm';
 
 async function main() {
@@ -20,14 +20,20 @@ async function main() {
   for (const doc of docs) {
     console.log(`\nDeleting: ${doc.title} (${doc.id})`);
 
+    // Delete highlights first (foreign key constraint)
+    await db
+      .delete(highlight)
+      .where(eq(highlight.documentId, doc.id));
+    console.log('  - Deleted highlights');
+
     // Delete chapters
-    const deletedChapters = await db
+    await db
       .delete(epubChapter)
       .where(eq(epubChapter.documentId, doc.id));
     console.log('  - Deleted chapters');
 
     // Delete outline
-    const deletedOutline = await db
+    await db
       .delete(documentOutline)
       .where(eq(documentOutline.documentId, doc.id));
     console.log('  - Deleted outline');
