@@ -279,7 +279,7 @@ export function EpubChapter({
       <div
         ref={contentRef}
         className="
-          prose prose-lg dark:prose-invert max-w-none
+          font-serif prose prose-lg dark:prose-invert max-w-none
           prose-headings:font-semibold
           prose-a:text-primary prose-a:no-underline hover:prose-a:underline
           prose-img:rounded-lg prose-img:shadow-md prose-img:mx-auto

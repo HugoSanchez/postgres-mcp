@@ -12,6 +12,7 @@ const config: Config = {
       fontFamily: {
         sans: ['var(--font-geist)'],
         mono: ['var(--font-geist-mono)'],
+        serif: ['var(--font-newsreader)'],
       },
       screens: {
         'toast-mobile': '600px',
