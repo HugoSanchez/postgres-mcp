@@ -555,6 +555,7 @@ export function EpubReader({
           onTabChange={setActiveTab}
           notes={notes}
           onNotesChange={setNotes}
+          documentTitle={document?.title}
         />
       ) : (
         <SidePanel
@@ -566,6 +567,7 @@ export function EpubReader({
           onTabChange={setActiveTab}
           notes={notes}
           onNotesChange={setNotes}
+          documentTitle={document?.title}
         />
       )}
     </div>

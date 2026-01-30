@@ -2,7 +2,7 @@
 
 import React from "react";
 import { useState, useRef, useEffect } from "react";
-import { X, Send, Sparkles, FileText, PanelRightClose } from "lucide-react";
+import { X, Send, Sparkles, FileText, PanelRightClose, PanelRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -24,6 +24,7 @@ interface SidePanelProps {
   onTabChange: (tab: "chat" | "notes") => void;
   notes: string;
   onNotesChange: (notes: string) => void;
+  documentTitle?: string;
 }
 
 export function SidePanel({
@@ -35,6 +36,7 @@ export function SidePanel({
   onTabChange,
   notes,
   onNotesChange,
+  documentTitle,
 }: SidePanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -127,25 +129,50 @@ export function SidePanel({
   };
 
   return (
-    <div
-      ref={panelRef}
-      className={cn(
-        "h-screen flex flex-col bg-muted/50 border-l border-border relative",
-        "overflow-hidden",
-        !isResizing && "transition-all duration-300 ease-out",
-        open ? "opacity-100" : "w-0 opacity-0"
-      )}
-      style={{ width: open ? width : 0 }}
-    >
-      {/* Resize handle */}
-      <div
-        onMouseDown={() => setIsResizing(true)}
+    <div className="flex h-screen relative">
+      {/* Toggle handle - always visible, positioned below header */}
+      <button
+        type="button"
+        onClick={() => onOpenChange(!open)}
         className={cn(
-          "absolute left-0 top-0 bottom-0 w-1 cursor-col-resize z-10",
-          "hover:bg-accent/50 transition-colors",
-          isResizing && "bg-accent"
+          "absolute left-0 top-1/2 -translate-x-full -translate-y-1/2",
+          "flex items-center justify-center",
+          "w-6 h-12 rounded-l-lg",
+          "bg-white dark:bg-background border border-r-0 border-border",
+          "text-muted-foreground hover:text-foreground hover:bg-accent/50",
+          "transition-colors cursor-pointer",
+          "z-20"
         )}
-      />
+        aria-label={open ? "Close panel" : "Open panel"}
+      >
+        {open ? (
+          <PanelRightClose className="h-4 w-4" />
+        ) : (
+          <PanelRight className="h-4 w-4" />
+        )}
+      </button>
+
+      {/* Panel content */}
+      <div
+        ref={panelRef}
+        className={cn(
+          "h-screen flex flex-col bg-white dark:bg-background border-l border-border relative",
+          "overflow-hidden",
+          !isResizing && "transition-all duration-300 ease-out"
+        )}
+        style={{ width: open ? width : 0, opacity: open ? 1 : 0 }}
+      >
+        {/* Resize handle */}
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          onMouseDown={() => setIsResizing(true)}
+          className={cn(
+            "absolute left-0 top-0 bottom-0 w-1 cursor-col-resize z-10",
+            "hover:bg-accent/50 transition-colors",
+            isResizing && "bg-accent"
+          )}
+        />
 
       <div className={cn(
         "flex flex-col h-full",
@@ -154,30 +181,20 @@ export function SidePanel({
       )}
       style={{ minWidth: width }}
       >
-        {/* Header with tabs and close */}
+        {/* Header with tabs */}
         <div className="px-4 h-14 flex items-center border-b border-border shrink-0">
-          <div className="flex items-center justify-between w-full">
-            <Tabs value={activeTab} onValueChange={(v) => onTabChange(v as "chat" | "notes")} className="flex-1">
-              <TabsList className="w-full bg-secondary">
-                <TabsTrigger value="chat" className="flex-1 gap-2 data-[state=active]:bg-card">
-                  <Sparkles className="h-4 w-4" />
-                  Chat
-                </TabsTrigger>
-                <TabsTrigger value="notes" className="flex-1 gap-2 data-[state=active]:bg-card">
-                  <FileText className="h-4 w-4" />
-                  Notes
-                </TabsTrigger>
-              </TabsList>
-            </Tabs>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => onOpenChange(false)}
-              className="ml-2 h-8 w-8 text-muted-foreground hover:text-foreground shrink-0"
-            >
-              <PanelRightClose className="h-4 w-4" />
-            </Button>
-          </div>
+          <Tabs value={activeTab} onValueChange={(v) => onTabChange(v as "chat" | "notes")} className="w-full">
+            <TabsList className="w-full bg-secondary">
+              <TabsTrigger value="chat" className="flex-1 gap-2 data-[state=active]:bg-card">
+                <Sparkles className="h-4 w-4" />
+                Chat
+              </TabsTrigger>
+              <TabsTrigger value="notes" className="flex-1 gap-2 data-[state=active]:bg-card">
+                <FileText className="h-4 w-4" />
+                Notes
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
         </div>
 
         {/* Content */}
@@ -186,16 +203,14 @@ export function SidePanel({
             {/* Messages area */}
             <ScrollArea className="flex-1 p-4" ref={scrollRef}>
               {messages.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-center px-6 py-12">
-                  <div className="h-12 w-12 rounded-full bg-accent/10 flex items-center justify-center mb-4">
-                    <Sparkles className="h-6 w-6 text-accent" />
-                  </div>
-                  <h3 className="font-medium text-foreground mb-2">
-                    Ask about the text
+                <div className="h-full flex flex-col items-start justify-center px-6 py-12">
+                  <h3 className="text-2xl font-semibold text-foreground mb-2">
+                    Hey there!
                   </h3>
-                  <p className="text-sm text-muted-foreground">
-                    Highlight any passage and ask questions, get definitions, or
-                    explore deeper meanings.
+                  <p className="text-xl text-muted-foreground">
+                    {documentTitle
+                      ? `I see you are reading ${documentTitle}, what can I help you with?`
+                      : 'What can I help you with?'}
                   </p>
                 </div>
               ) : (
@@ -258,7 +273,7 @@ export function SidePanel({
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
                   placeholder="Ask about the text..."
-                  className="flex-1 resize-none bg-neutral-200 dark:bg-neutral-700 rounded-xl px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-accent min-h-[100px] max-h-[200px] scrollbar-none"
+                  className="flex-1 resize-none bg-neutral-50 dark:bg-neutral-900 rounded-xl px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none min-h-[100px] max-h-[200px] scrollbar-none"
                   rows={3}
                 />
                 <Button
@@ -275,6 +290,7 @@ export function SidePanel({
         ) : (
           <Notepad content={notes} onContentChange={onNotesChange} />
         )}
+      </div>
       </div>
     </div>
   );

@@ -24,6 +24,7 @@ interface MobilePanelProps {
   onTabChange: (tab: "chat" | "notes") => void;
   notes: string;
   onNotesChange: (notes: string) => void;
+  documentTitle?: string;
 }
 
 export function MobilePanel({
@@ -35,6 +36,7 @@ export function MobilePanel({
   onTabChange,
   notes,
   onNotesChange,
+  documentTitle,
 }: MobilePanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -98,7 +100,7 @@ export function MobilePanel({
     <div
       className={cn(
         "fixed left-0 right-0 bottom-0 z-50 h-[60vh]",
-        "bg-card border-t border-border rounded-t-2xl shadow-2xl",
+        "bg-white dark:bg-background border-t border-border rounded-t-2xl shadow-2xl",
         "flex flex-col",
         "transition-transform duration-300 ease-out",
         open ? "translate-y-0" : "translate-y-full"
@@ -146,15 +148,14 @@ export function MobilePanel({
           {/* Messages area */}
           <ScrollArea className="flex-1 p-4" ref={scrollRef}>
             {messages.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center text-center px-6 py-8">
-                <div className="h-10 w-10 rounded-full bg-accent/10 flex items-center justify-center mb-3">
-                  <Sparkles className="h-5 w-5 text-accent" />
-                </div>
-                <h3 className="font-medium text-foreground mb-1 text-sm">
-                  Ask about the text
+              <div className="h-full flex flex-col items-start justify-center px-6 py-8">
+                <h3 className="font-semibold text-foreground mb-1 text-sm">
+                  Hey there!
                 </h3>
                 <p className="text-xs text-muted-foreground">
-                  Highlight any passage and ask questions.
+                  {documentTitle
+                    ? `I see you are reading ${documentTitle}, what can I help you with?`
+                    : 'What can I help you with?'}
                 </p>
               </div>
             ) : (
