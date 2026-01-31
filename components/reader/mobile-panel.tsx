@@ -45,6 +45,9 @@ interface MobilePanelProps {
   onAnnotationCreated?: (chapterIndex: number) => void;
   seedMessages?: SeedMessages | null;
   onSeedMessagesConsumed?: () => void;
+  scrollToQuoteText?: string | null;
+  onScrollToQuoteComplete?: () => void;
+  onQuoteClick?: (quoteText: string) => void;
 }
 
 export function MobilePanel({
@@ -62,6 +65,9 @@ export function MobilePanel({
   onAnnotationCreated,
   seedMessages,
   onSeedMessagesConsumed,
+  scrollToQuoteText,
+  onScrollToQuoteComplete,
+  onQuoteClick,
 }: MobilePanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -416,7 +422,13 @@ export function MobilePanel({
         </>
       ) : (
         <div className="flex-1 overflow-hidden">
-          <Notepad content={notes} onContentChange={onNotesChange} />
+          <Notepad
+            content={notes}
+            onContentChange={onNotesChange}
+            scrollToQuoteText={scrollToQuoteText}
+            onScrollToQuoteComplete={onScrollToQuoteComplete}
+            onQuoteClick={onQuoteClick}
+          />
         </div>
       )}
     </div>

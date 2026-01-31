@@ -105,7 +105,22 @@ export function EpubReader({
   const [chatContext, setChatContext] = useState('');
   const [chatContextAnchor, setChatContextAnchor] = useState<EpubHighlightAnchor | null>(null);
   const [notes, setNotes] = useState('');
+  const [noteId, setNoteId] = useState<string | null>(null);
   const [seedMessages, setSeedMessages] = useState<{ question: string; answer: string } | null>(null);
+  const [scrollToQuoteText, setScrollToQuoteText] = useState<string | null>(null);
+  const saveNotesTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastSavedNotesRef = useRef<string>('');
+  const notesRef = useRef<string>('');
+  const noteIdRef = useRef<string | null>(null);
+
+  // Keep refs in sync with state
+  useEffect(() => {
+    notesRef.current = notes;
+  }, [notes]);
+
+  useEffect(() => {
+    noteIdRef.current = noteId;
+  }, [noteId]);
 
   // Fetch document metadata and chapter list
   useEffect(() => {
@@ -133,6 +148,109 @@ export function EpubReader({
 
     fetchDocument();
   }, [documentId]);
+
+  // Fetch notes on mount
+  useEffect(() => {
+    async function fetchNotes() {
+      try {
+        const res = await fetch(
+          `/api/reader/notes?documentId=${documentId}&documentType=epub`
+        );
+        if (res.ok) {
+          const data = await res.json();
+          setNoteId(data.note.id);
+          setNotes(data.note.content || '');
+        }
+      } catch (err) {
+        console.error('Failed to fetch notes:', err);
+      }
+    }
+
+    fetchNotes();
+  }, [documentId]);
+
+  // Save notes with debouncing
+  useEffect(() => {
+    if (!noteId) return;
+
+    // Clear previous timeout
+    if (saveNotesTimeoutRef.current) {
+      clearTimeout(saveNotesTimeoutRef.current);
+    }
+
+    // Debounce save by 1 second
+    saveNotesTimeoutRef.current = setTimeout(async () => {
+      try {
+        await fetch('/api/reader/notes', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ noteId, content: notes }),
+        });
+        lastSavedNotesRef.current = notes;
+      } catch (err) {
+        console.error('Failed to save notes:', err);
+      }
+    }, 1000);
+
+    return () => {
+      if (saveNotesTimeoutRef.current) {
+        clearTimeout(saveNotesTimeoutRef.current);
+      }
+    };
+  }, [notes, noteId]);
+
+  // Immediate save function (for panel close and page unload)
+  const saveNotesImmediately = useCallback(() => {
+    const currentNoteId = noteIdRef.current;
+    const currentNotes = notesRef.current;
+
+    // Skip if no note or nothing has changed since last save
+    if (!currentNoteId || currentNotes === lastSavedNotesRef.current) return;
+
+    // Clear any pending debounced save
+    if (saveNotesTimeoutRef.current) {
+      clearTimeout(saveNotesTimeoutRef.current);
+      saveNotesTimeoutRef.current = null;
+    }
+
+    // Use sendBeacon for reliable delivery even during page unload
+    const blob = new Blob(
+      [JSON.stringify({ noteId: currentNoteId, content: currentNotes })],
+      { type: 'application/json' }
+    );
+    navigator.sendBeacon('/api/reader/notes', blob);
+    lastSavedNotesRef.current = currentNotes;
+  }, []);
+
+  // Save on page unload/visibility change
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        saveNotesImmediately();
+      }
+    };
+
+    const handleBeforeUnload = () => {
+      saveNotesImmediately();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [saveNotesImmediately]);
+
+  // Handle panel open/close - save immediately when closing
+  const handlePanelOpenChange = useCallback((open: boolean) => {
+    if (!open) {
+      // Panel is closing - save immediately
+      saveNotesImmediately();
+    }
+    setPanelOpen(open);
+  }, [saveNotesImmediately]);
 
   // Fetch highlights for a chapter
   const fetchHighlights = useCallback(
@@ -374,22 +492,108 @@ export function EpubReader({
   }, []);
 
   // Handle Add to Notes action from selection
-  const handleAddToNotes = useCallback((selectedText: string) => {
-    const quotedText = `> ${selectedText}\n\n`;
+  const handleAddToNotes = useCallback(async (
+    chapterIndex: number,
+    data: { selectedText: string; startOffset: number; endOffset: number }
+  ) => {
+    // Add quote to notes
+    const quotedText = `> ${data.selectedText}\n\n`;
     setNotes((prev) => (prev ? `${prev}${quotedText}` : quotedText));
     setActiveTab('notes');
     setPanelOpen(true);
-  }, []);
 
-  // Handle annotation click - seed the chat with the Q&A so user can continue conversation
+    // Create note-quote annotation to link the passage to notes
+    try {
+      const res = await fetch('/api/reader/annotations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          documentId,
+          documentType: 'epub',
+          anchor: {
+            chapterIndex,
+            startOffset: data.startOffset,
+            endOffset: data.endOffset,
+          },
+          selectedText: data.selectedText,
+          type: 'note-quote',
+          content: {},
+        }),
+      });
+
+      if (res.ok) {
+        // Refresh annotations for this chapter to show the marker
+        fetchAnnotations(chapterIndex);
+      }
+    } catch (err) {
+      console.error('Failed to create note-quote annotation:', err);
+    }
+  }, [documentId, fetchAnnotations]);
+
+  // Handle annotation click - seed the chat with the Q&A or scroll to note quote
   const handleAnnotationClick = useCallback((annotation: AnnotationRow) => {
-    const content = annotation.content as { question?: string; answer?: string };
-    if (content.question && content.answer) {
-      setSeedMessages({ question: content.question, answer: content.answer });
-      setActiveTab('chat');
+    if (annotation.type === 'note-quote') {
+      // For note-quote, open notes panel and scroll to the quote
+      setScrollToQuoteText(annotation.selectedText);
+      setActiveTab('notes');
       setPanelOpen(true);
+    } else {
+      // For QA annotations, seed the chat
+      const content = annotation.content as { question?: string; answer?: string };
+      if (content.question && content.answer) {
+        setSeedMessages({ question: content.question, answer: content.answer });
+        setActiveTab('chat');
+        setPanelOpen(true);
+      }
     }
   }, []);
+
+  // Handle quote click in notes - navigate to document location
+  const handleQuoteClick = useCallback(async (quoteText: string) => {
+    // Find the note-quote annotation that matches this quote text
+    let matchingAnnotation: AnnotationRow | null = null;
+
+    for (const [, annotations] of annotationsByChapter) {
+      const found = annotations.find(
+        (a) => a.type === 'note-quote' && a.selectedText.trim() === quoteText.trim()
+      );
+      if (found) {
+        matchingAnnotation = found;
+        break;
+      }
+    }
+
+    if (!matchingAnnotation) {
+      console.warn('No matching note-quote annotation found for quote:', quoteText);
+      return;
+    }
+
+    const anchor = matchingAnnotation.anchor as EpubHighlightAnchor;
+
+    // Navigate to the chapter
+    await goToChapter(anchor.chapterIndex);
+
+    // Wait for chapter to render, then scroll to the text and highlight it
+    setTimeout(() => {
+      const chapterEl = chapterRefs.current.get(anchor.chapterIndex);
+      if (!chapterEl) return;
+
+      // Find the annotation span in the DOM
+      const annotationSpan = chapterEl.querySelector(
+        `[data-annotation-id="${matchingAnnotation.id}"]`
+      );
+      if (annotationSpan) {
+        // Scroll to the annotation
+        annotationSpan.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+        // Add flash highlight effect
+        annotationSpan.classList.add('annotation-flash');
+        setTimeout(() => {
+          annotationSpan.classList.remove('annotation-flash');
+        }, 2000);
+      }
+    }, 300);
+  }, [annotationsByChapter, goToChapter]);
 
   // Scroll tracking for progress (debounced)
   useEffect(() => {
@@ -560,7 +764,7 @@ export function EpubReader({
                     annotations={annotations}
                     onCreateHighlight={(data) => handleCreateHighlight(index, data)}
                     onAskAI={(data) => handleAskAI(index, data)}
-                    onAddToNotes={handleAddToNotes}
+                    onAddToNotes={(data) => handleAddToNotes(index, data)}
                     onAnnotationClick={handleAnnotationClick}
                   />
                   {/* Chapter separator */}
@@ -597,7 +801,7 @@ export function EpubReader({
       {isMobile ? (
         <MobilePanel
           open={panelOpen}
-          onOpenChange={setPanelOpen}
+          onOpenChange={handlePanelOpenChange}
           context={chatContext}
           contextAnchor={chatContextAnchor}
           onClearContext={() => {
@@ -613,11 +817,14 @@ export function EpubReader({
           onAnnotationCreated={fetchAnnotations}
           seedMessages={seedMessages}
           onSeedMessagesConsumed={() => setSeedMessages(null)}
+          scrollToQuoteText={scrollToQuoteText}
+          onScrollToQuoteComplete={() => setScrollToQuoteText(null)}
+          onQuoteClick={handleQuoteClick}
         />
       ) : (
         <SidePanel
           open={panelOpen}
-          onOpenChange={setPanelOpen}
+          onOpenChange={handlePanelOpenChange}
           context={chatContext}
           contextAnchor={chatContextAnchor}
           onClearContext={() => {
@@ -633,6 +840,9 @@ export function EpubReader({
           onAnnotationCreated={fetchAnnotations}
           seedMessages={seedMessages}
           onSeedMessagesConsumed={() => setSeedMessages(null)}
+          scrollToQuoteText={scrollToQuoteText}
+          onScrollToQuoteComplete={() => setScrollToQuoteText(null)}
+          onQuoteClick={handleQuoteClick}
         />
       )}
     </div>

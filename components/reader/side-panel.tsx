@@ -45,6 +45,9 @@ interface SidePanelProps {
   onAnnotationCreated?: (chapterIndex: number) => void;
   seedMessages?: SeedMessages | null;
   onSeedMessagesConsumed?: () => void;
+  scrollToQuoteText?: string | null;
+  onScrollToQuoteComplete?: () => void;
+  onQuoteClick?: (quoteText: string) => void;
 }
 
 export function SidePanel({
@@ -62,6 +65,9 @@ export function SidePanel({
   onAnnotationCreated,
   seedMessages,
   onSeedMessagesConsumed,
+  scrollToQuoteText,
+  onScrollToQuoteComplete,
+  onQuoteClick,
 }: SidePanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -470,7 +476,13 @@ export function SidePanel({
               </div>
             </>
           ) : (
-            <Notepad content={notes} onContentChange={onNotesChange} />
+            <Notepad
+              content={notes}
+              onContentChange={onNotesChange}
+              scrollToQuoteText={scrollToQuoteText}
+              onScrollToQuoteComplete={onScrollToQuoteComplete}
+              onQuoteClick={onQuoteClick}
+            />
           )}
         </div>
       </div>

@@ -345,45 +345,49 @@
 }
 
 /* Annotation styles for pinned Q&A and other annotations */
+/* Single consistent underline style for all annotation types */
 .annotation {
     @apply cursor-pointer transition-colors relative;
     text-decoration: underline;
-    text-decoration-style: dashed;
-    text-underline-offset: 3px;
-}
-
-.annotation-qa {
-    text-decoration-color: rgb(249 115 22 / 0.7);
-}
-
-.annotation-comment {
-    text-decoration-color: rgb(59 130 246 / 0.7);
     text-decoration-style: dotted;
+    text-decoration-color: rgb(115 115 115 / 0.6);
+    text-underline-offset: 3px;
+    text-decoration-thickness: 1.5px;
 }
 
-.annotation-marker {
-    text-decoration-color: rgb(234 179 8 / 0.7);
-    text-decoration-style: wavy;
+.dark .annotation {
+    text-decoration-color: rgb(163 163 163 / 0.6);
 }
 
-.dark .annotation-qa {
-    text-decoration-color: rgb(251 146 60 / 0.8);
+/* Prevent nested annotations from having multiple underlines */
+.annotation .annotation {
+    text-decoration: none;
 }
 
-.dark .annotation-comment {
-    text-decoration-color: rgb(96 165 250 / 0.8);
-}
-
-.dark .annotation-marker {
-    text-decoration-color: rgb(250 204 21 / 0.8);
-}
-
-/* Hover state for annotations */
+/* Hover state for annotations - subtle background highlight */
 .annotation:hover {
-    text-decoration-thickness: 2px;
-    background-color: rgb(249 115 22 / 0.1);
+    background-color: rgb(115 115 115 / 0.1);
 }
 
 .dark .annotation:hover {
-    background-color: rgb(251 146 60 / 0.15);
+    background-color: rgb(163 163 163 / 0.15);
+}
+
+/* Annotation flash animation for navigation */
+@keyframes annotation-flash {
+    0%, 100% { background-color: transparent; }
+    25%, 75% { background-color: rgb(16 185 129 / 0.3); }
+}
+
+.annotation-flash {
+    animation: annotation-flash 2s ease;
+}
+
+.dark .annotation-flash {
+    animation: annotation-flash-dark 2s ease;
+}
+
+@keyframes annotation-flash-dark {
+    0%, 100% { background-color: transparent; }
+    25%, 75% { background-color: rgb(52 211 153 / 0.3); }
 }

@@ -49,10 +49,10 @@ export async function GET(request: Request) {
   }
 
   // Validate type if provided
-  const validTypes: AnnotationType[] = ['qa', 'comment', 'marker'];
+  const validTypes: AnnotationType[] = ['qa', 'comment', 'marker', 'note-quote'];
   if (typeParam && !validTypes.includes(typeParam)) {
     return NextResponse.json(
-      { error: 'Invalid type. Must be: qa, comment, or marker' },
+      { error: 'Invalid type. Must be: qa, comment, marker, or note-quote' },
       { status: 400 }
     );
   }
@@ -119,10 +119,10 @@ export async function POST(request: Request) {
     }
 
     // Validate type
-    const validTypes: AnnotationType[] = ['qa', 'comment', 'marker'];
+    const validTypes: AnnotationType[] = ['qa', 'comment', 'marker', 'note-quote'];
     if (!validTypes.includes(type)) {
       return NextResponse.json(
-        { error: 'Invalid type. Must be: qa, comment, or marker' },
+        { error: 'Invalid type. Must be: qa, comment, marker, or note-quote' },
         { status: 400 }
       );
     }
@@ -174,6 +174,7 @@ export async function POST(request: Request) {
         );
       }
     }
+    // note-quote type accepts empty content object - the selectedText field stores the quote
 
     const annotation = await createAnnotation({
       documentId,

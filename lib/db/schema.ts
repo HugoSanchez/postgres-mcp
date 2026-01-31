@@ -277,7 +277,7 @@ export const annotation = pgTable(
     anchor: jsonb('anchor').notNull(), // { chapterIndex, startOffset, endOffset }
     selectedText: text('selectedText').notNull(),
     type: varchar('type', {
-      enum: ['qa', 'comment', 'marker'],
+      enum: ['qa', 'comment', 'marker', 'note-quote'],
     }).notNull(),
     content: jsonb('content').notNull(), // Structure varies by type
     color: varchar('color', {
@@ -331,3 +331,33 @@ export const readingProgress = pgTable(
 );
 
 export type ReadingProgress = InferSelectModel<typeof readingProgress>;
+
+export const documentNote = pgTable(
+  'DocumentNote',
+  {
+    id: uuid('id').notNull().defaultRandom(),
+    userId: uuid('userId')
+      .notNull()
+      .references(() => user.id),
+    documentId: uuid('documentId')
+      .notNull()
+      .references(() => document.id),
+    documentType: varchar('documentType', {
+      enum: ['epub', 'pdf', 'article'],
+    }).notNull(),
+    title: varchar('title', { length: 255 }), // nullable for future multi-note UI
+    content: text('content').notNull().default(''),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+    updatedAt: timestamp('updatedAt').notNull().defaultNow(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.id] }),
+    userDocumentIdx: index('document_note_user_document_idx').on(
+      table.userId,
+      table.documentId
+    ),
+    userIdx: index('document_note_user_idx').on(table.userId),
+  })
+);
+
+export type DocumentNote = InferSelectModel<typeof documentNote>;

@@ -13,6 +13,9 @@ interface MarkdownEditorProps {
   content: string;
   onContentChange: (content: string) => void;
   placeholder?: string;
+  scrollToQuoteText?: string | null;
+  onScrollToQuoteComplete?: () => void;
+  onQuoteClick?: (quoteText: string) => void;
 }
 
 // Input rules for markdown-style typing
@@ -149,7 +152,14 @@ function buildBackspaceKeymap() {
   );
 }
 
-export function MarkdownEditor({ content, onContentChange, placeholder = "Start writing..." }: MarkdownEditorProps) {
+export function MarkdownEditor({
+  content,
+  onContentChange,
+  placeholder = "Start writing...",
+  scrollToQuoteText,
+  onScrollToQuoteComplete,
+  onQuoteClick,
+}: MarkdownEditorProps) {
   const editorRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const isExternalUpdate = useRef(false);
@@ -182,7 +192,7 @@ export function MarkdownEditor({ content, onContentChange, placeholder = "Start 
           "Mod-i": toggleMark(schema.marks.em),
           "Mod-`": toggleMark(schema.marks.code),
           "Enter": buildEnterKeymap(),
-          "Backspace": chainCommands(buildBackspaceKeymap(), baseKeymap["Backspace"]),
+          "Backspace": chainCommands(buildBackspaceKeymap(), baseKeymap.Backspace),
         }),
         keymap(baseKeymap),
         history(),
@@ -230,6 +240,54 @@ export function MarkdownEditor({ content, onContentChange, placeholder = "Start 
       isExternalUpdate.current = false;
     }
   }, [content, parseFromMarkdown, serializeToMarkdown]);
+
+  // Scroll to quote text when requested
+  useEffect(() => {
+    if (!scrollToQuoteText || !editorRef.current) return;
+
+    // Find blockquote containing the quote text
+    const blockquotes = editorRef.current.querySelectorAll('blockquote');
+    for (const bq of blockquotes) {
+      const text = bq.textContent?.trim() || '';
+      // Check if this blockquote contains the quote (allowing for minor differences)
+      if (text.includes(scrollToQuoteText.trim()) || scrollToQuoteText.trim().includes(text)) {
+        // Scroll into view
+        bq.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+        // Add highlight animation
+        bq.classList.add('quote-highlight-flash');
+        setTimeout(() => {
+          bq.classList.remove('quote-highlight-flash');
+        }, 2000);
+
+        break;
+      }
+    }
+
+    // Signal completion
+    onScrollToQuoteComplete?.();
+  }, [scrollToQuoteText, onScrollToQuoteComplete]);
+
+  // Attach click handlers to blockquotes for navigation
+  useEffect(() => {
+    if (!onQuoteClick || !editorRef.current) return;
+
+    const container = editorRef.current;
+
+    const handleClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      const blockquote = target.closest('blockquote');
+      if (blockquote && container.contains(blockquote)) {
+        const quoteText = blockquote.textContent?.trim() || '';
+        if (quoteText) {
+          onQuoteClick(quoteText);
+        }
+      }
+    };
+
+    container.addEventListener('click', handleClick);
+    return () => container.removeEventListener('click', handleClick);
+  }, [onQuoteClick]);
 
   return (
     <div className="markdown-editor-wrapper h-full">
@@ -332,6 +390,25 @@ export function MarkdownEditor({ content, onContentChange, placeholder = "Start 
           padding-left: 1rem;
           margin: 0.75rem 0;
           color: hsl(var(--muted-foreground));
+          transition: background-color 0.3s ease, border-color 0.3s ease;
+          cursor: pointer;
+          border-radius: 0 0.25rem 0.25rem 0;
+        }
+
+        .prose-editor blockquote:hover {
+          background-color: hsl(var(--accent) / 0.5);
+          border-left-color: hsl(var(--primary));
+        }
+
+        /* Quote highlight flash animation */
+        @keyframes quote-flash {
+          0%, 100% { background-color: transparent; }
+          25%, 75% { background-color: hsl(var(--primary) / 0.2); }
+        }
+
+        .prose-editor blockquote.quote-highlight-flash {
+          animation: quote-flash 2s ease;
+          border-left-color: hsl(var(--primary));
         }
 
         /* Lists */

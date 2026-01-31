@@ -2,7 +2,7 @@
 
 import { useRef, useState, useCallback, useEffect, useMemo, useLayoutEffect } from 'react';
 import { motion } from 'framer-motion';
-import { MessageSquareText, MessageCircle, Bookmark } from 'lucide-react';
+import { MessageSquareText, MessageCircle, Bookmark, StickyNote } from 'lucide-react';
 import { SelectionPopover } from './selection-popover';
 import { applyHighlightsAndAnnotations } from '@/lib/epub/apply-highlights';
 import type { HighlightRow, HighlightColor, AnnotationRow } from '@/lib/db/types';
@@ -11,6 +11,7 @@ interface AnnotationMarker {
   id: string;
   type: string;
   top: number;
+  rightOffset: number; // Horizontal offset to prevent overlapping markers
   annotation: AnnotationRow;
 }
 
@@ -35,7 +36,7 @@ interface EpubChapterProps {
     color: HighlightColor;
   }) => Promise<void>;
   onAskAI?: (data: { selectedText: string; startOffset: number; endOffset: number }) => void;
-  onAddToNotes?: (selectedText: string) => void;
+  onAddToNotes?: (data: { selectedText: string; startOffset: number; endOffset: number }) => void;
   onAnnotationClick?: (annotation: AnnotationRow) => void;
 }
 
@@ -124,7 +125,7 @@ export function EpubChapter({
     // Wait a tick for DOM to be fully updated
     requestAnimationFrame(() => {
       const articleRect = article.getBoundingClientRect();
-      const markers: AnnotationMarker[] = [];
+      const rawMarkers: Array<{ id: string; type: string; top: number; annotation: AnnotationRow }> = [];
 
       for (const annotation of annotations) {
         const element = container.querySelector(`[data-annotation-id="${annotation.id}"]`);
@@ -132,13 +133,39 @@ export function EpubChapter({
           const rect = element.getBoundingClientRect();
           // Calculate top position relative to the article container
           const top = rect.top - articleRect.top;
-          markers.push({
+          rawMarkers.push({
             id: annotation.id,
             type: annotation.type,
             top,
             annotation,
           });
         }
+      }
+
+      // Sort by top position
+      rawMarkers.sort((a, b) => a.top - b.top);
+
+      // Calculate horizontal offsets for overlapping markers
+      const MARKER_HEIGHT = 32; // Approximate height of marker button
+      const HORIZONTAL_OFFSET = 36; // Offset for each additional marker
+      const markers: AnnotationMarker[] = [];
+
+      for (let i = 0; i < rawMarkers.length; i++) {
+        const current = rawMarkers[i];
+        let rightOffset = 0;
+
+        // Check how many markers before this one are at a similar vertical position
+        for (let j = 0; j < i; j++) {
+          const other = rawMarkers[j];
+          if (Math.abs(current.top - other.top) < MARKER_HEIGHT) {
+            rightOffset += HORIZONTAL_OFFSET;
+          }
+        }
+
+        markers.push({
+          ...current,
+          rightOffset,
+        });
       }
 
       setAnnotationMarkers(markers);
@@ -332,11 +359,11 @@ export function EpubChapter({
     const pending = pendingHighlightRef.current;
     if (!pending || !onAddToNotes) return;
 
-    const text = pending.text;
+    const { text, startOffset, endOffset } = pending;
     // Remove the pending mark since we're not highlighting
     removePendingMark();
     setPopoverData(null);
-    onAddToNotes(text);
+    onAddToNotes({ selectedText: text, startOffset, endOffset });
   }, [onAddToNotes, removePendingMark]);
 
   // Get icon component for annotation type
@@ -348,8 +375,34 @@ export function EpubChapter({
         return MessageCircle;
       case 'marker':
         return Bookmark;
+      case 'note-quote':
+        return StickyNote;
       default:
         return MessageSquareText;
+    }
+  };
+
+  // Get color classes for annotation type
+  const getAnnotationColors = (type: string) => {
+    if (type === 'note-quote') {
+      return 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-200 dark:hover:bg-emerald-900/50 border-emerald-200 dark:border-emerald-800';
+    }
+    return 'bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400 hover:bg-orange-200 dark:hover:bg-orange-900/50 border-orange-200 dark:border-orange-800';
+  };
+
+  // Get title for annotation type
+  const getAnnotationTitle = (type: string) => {
+    switch (type) {
+      case 'qa':
+        return 'Q&A annotation';
+      case 'comment':
+        return 'Comment';
+      case 'marker':
+        return 'Marker';
+      case 'note-quote':
+        return 'Quoted in notes';
+      default:
+        return 'Annotation';
     }
   };
 
@@ -387,7 +440,7 @@ export function EpubChapter({
 
       {/* Annotation margin markers - only visible on larger screens with margin space */}
       {annotationMarkers.length > 0 && (
-        <div className="hidden xl:block absolute top-0 -right-12 w-10 h-full pointer-events-none">
+        <div className="hidden xl:block absolute top-0 right-0 h-full pointer-events-none">
           {annotationMarkers.map((marker) => {
             const Icon = getAnnotationIcon(marker.type);
             return (
@@ -395,9 +448,12 @@ export function EpubChapter({
                 key={marker.id}
                 type="button"
                 onClick={() => onAnnotationClick?.(marker.annotation)}
-                className="absolute pointer-events-auto p-1.5 rounded-full bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400 hover:bg-orange-200 dark:hover:bg-orange-900/50 hover:scale-110 transition-all shadow-sm border border-orange-200 dark:border-orange-800"
-                style={{ top: marker.top - 4 }}
-                title={marker.type === 'qa' ? 'Q&A annotation' : marker.type === 'comment' ? 'Comment' : 'Marker'}
+                className={`absolute pointer-events-auto p-1.5 rounded-full hover:scale-110 transition-all shadow-sm border ${getAnnotationColors(marker.type)}`}
+                style={{
+                  top: marker.top - 4,
+                  right: -48 - marker.rightOffset, // Base offset + additional offset for overlapping markers
+                }}
+                title={getAnnotationTitle(marker.type)}
               >
                 <Icon className="h-4 w-4" />
               </button>

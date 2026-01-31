@@ -6,6 +6,7 @@ import type {
   highlight,
   annotation,
   readingProgress,
+  documentNote,
 } from './schema';
 
 export type DocumentRow = typeof document.$inferSelect;
@@ -36,11 +37,14 @@ export type DocumentType = 'epub' | 'pdf' | 'article';
 export type ReadingProgressRow = typeof readingProgress.$inferSelect;
 export type InsertReadingProgress = typeof readingProgress.$inferInsert;
 
+export type DocumentNoteRow = typeof documentNote.$inferSelect;
+export type InsertDocumentNote = typeof documentNote.$inferInsert;
+
 // Annotation types
 export type AnnotationRow = typeof annotation.$inferSelect;
 export type InsertAnnotation = typeof annotation.$inferInsert;
 
-export type AnnotationType = 'qa' | 'comment' | 'marker';
+export type AnnotationType = 'qa' | 'comment' | 'marker' | 'note-quote';
 export type AnnotationColor = 'orange' | 'yellow' | 'green' | 'blue' | 'pink' | 'purple';
 
 // Content types for different annotation kinds
@@ -57,7 +61,10 @@ export interface MarkerContent {
   symbol: '!!' | '?' | '***' | 'bookmark';
 }
 
-export type AnnotationContent = QAContent | CommentContent | MarkerContent;
+// Empty object - note-quote stores quote text in selectedText field
+export type NoteQuoteContent = Record<string, never>;
+
+export type AnnotationContent = QAContent | CommentContent | MarkerContent | NoteQuoteContent;
 
 // Type guards for narrowing content type
 export function isQAContent(content: AnnotationContent): content is QAContent {
@@ -70,4 +77,8 @@ export function isCommentContent(content: AnnotationContent): content is Comment
 
 export function isMarkerContent(content: AnnotationContent): content is MarkerContent {
   return 'symbol' in content;
+}
+
+export function isNoteQuoteContent(content: AnnotationContent): content is NoteQuoteContent {
+  return !('question' in content) && !('text' in content) && !('symbol' in content);
 }

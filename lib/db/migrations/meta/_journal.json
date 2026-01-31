@@ -92,6 +92,13 @@
       "when": 1769805002352,
       "tag": "0012_tough_squirrel_girl",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1769900000000,
+      "tag": "0013_amazing_thaddeus_ross",
+      "breakpoints": true
     }
   ]
 }
