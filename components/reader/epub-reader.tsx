@@ -17,6 +17,7 @@ import {
   DropdownMenuTrigger,
 } from '../ui/dropdown-menu';
 import { EpubChapter } from './epub-chapter';
+import { CommentPopover } from './comment-popover';
 import { SidePanel } from './side-panel';
 import { MobilePanel } from './mobile-panel';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -70,7 +71,7 @@ export function EpubReader({
   onProgressChange,
 }: EpubReaderProps) {
   // Document metadata
-  const [document, setDocument] = useState<EpubDocument | null>(null);
+  const [epubDoc, setEpubDoc] = useState<EpubDocument | null>(null);
   const [chapters, setChapters] = useState<ChapterMeta[]>([]);
   const [outline, setOutline] = useState<OutlineItem[]>([]);
 
@@ -108,6 +109,10 @@ export function EpubReader({
   const [noteId, setNoteId] = useState<string | null>(null);
   const [seedMessages, setSeedMessages] = useState<{ question: string; answer: string } | null>(null);
   const [scrollToQuoteText, setScrollToQuoteText] = useState<string | null>(null);
+  const [activeComment, setActiveComment] = useState<{
+    annotation: AnnotationRow;
+    position: { x: number; y: number };
+  } | null>(null);
   const saveNotesTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastSavedNotesRef = useRef<string>('');
   const notesRef = useRef<string>('');
@@ -136,7 +141,7 @@ export function EpubReader({
         }
 
         const data = await res.json();
-        setDocument(data.document);
+        setEpubDoc(data.document);
         setChapters(data.chapters);
         setOutline(data.outline);
       } catch (err) {
@@ -530,9 +535,88 @@ export function EpubReader({
     }
   }, [documentId, fetchAnnotations]);
 
-  // Handle annotation click - seed the chat with the Q&A or scroll to note quote
-  const handleAnnotationClick = useCallback((annotation: AnnotationRow) => {
-    if (annotation.type === 'note-quote') {
+  // Handle Add Comment action from selection
+  const handleAddComment = useCallback(async (
+    chapterIndex: number,
+    data: { selectedText: string; startOffset: number; endOffset: number; text: string }
+  ) => {
+    try {
+      const res = await fetch('/api/reader/annotations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          documentId,
+          documentType: 'epub',
+          anchor: {
+            chapterIndex,
+            startOffset: data.startOffset,
+            endOffset: data.endOffset,
+          },
+          selectedText: data.selectedText,
+          type: 'comment',
+          content: { text: data.text },
+        }),
+      });
+
+      if (res.ok) {
+        fetchAnnotations(chapterIndex);
+      }
+    } catch (err) {
+      console.error('Failed to create comment annotation:', err);
+    }
+  }, [documentId, fetchAnnotations]);
+
+  // Handle Edit Comment
+  const handleEditComment = useCallback(async (annotationId: string, newText: string) => {
+    const res = await fetch(`/api/reader/annotations/${annotationId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: { text: newText } }),
+    });
+
+    if (res.ok) {
+      // Refresh annotations for all loaded chapters
+      for (const chapterIndex of visibleChapterIndices) {
+        fetchAnnotations(chapterIndex);
+      }
+      // Update the active comment with new text
+      setActiveComment((prev) => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          annotation: {
+            ...prev.annotation,
+            content: { text: newText },
+          },
+        };
+      });
+    } else {
+      throw new Error('Failed to update comment');
+    }
+  }, [fetchAnnotations, visibleChapterIndices]);
+
+  // Handle Delete Comment
+  const handleDeleteComment = useCallback(async (annotationId: string) => {
+    const res = await fetch(`/api/reader/annotations/${annotationId}`, {
+      method: 'DELETE',
+    });
+
+    if (res.ok) {
+      // Refresh annotations for all loaded chapters
+      for (const chapterIndex of visibleChapterIndices) {
+        fetchAnnotations(chapterIndex);
+      }
+    } else {
+      throw new Error('Failed to delete comment');
+    }
+  }, [fetchAnnotations, visibleChapterIndices]);
+
+  // Handle annotation click - seed the chat with the Q&A, scroll to note quote, or show comment
+  const handleAnnotationClick = useCallback((annotation: AnnotationRow, position: { x: number; y: number }) => {
+    if (annotation.type === 'comment') {
+      // For comments, show the comment popover
+      setActiveComment({ annotation, position });
+    } else if (annotation.type === 'note-quote') {
       // For note-quote, open notes panel and scroll to the quote
       setScrollToQuoteText(annotation.selectedText);
       setActiveTab('notes');
@@ -659,7 +743,7 @@ export function EpubReader({
   }
 
   // Error state
-  if (error && !document) {
+  if (error && !epubDoc) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-4">
         <p className="text-destructive">{error}</p>
@@ -670,7 +754,7 @@ export function EpubReader({
     );
   }
 
-  if (!document) return null;
+  if (!epubDoc) return null;
 
   return (
     <div className="flex h-full">
@@ -686,7 +770,7 @@ export function EpubReader({
           <div className="flex items-center gap-2 min-w-0">
             <BookOpen className="size-4 text-muted-foreground shrink-0" />
             <span className="text-sm font-medium text-foreground truncate">
-              {document.title}
+              {epubDoc.title}
             </span>
             {currentChapter && (
               <span className="text-xs text-muted-foreground truncate">
@@ -765,6 +849,7 @@ export function EpubReader({
                     onCreateHighlight={(data) => handleCreateHighlight(index, data)}
                     onAskAI={(data) => handleAskAI(index, data)}
                     onAddToNotes={(data) => handleAddToNotes(index, data)}
+                    onAddComment={(data) => handleAddComment(index, data)}
                     onAnnotationClick={handleAnnotationClick}
                   />
                   {/* Chapter separator */}
@@ -813,7 +898,7 @@ export function EpubReader({
           notes={notes}
           onNotesChange={setNotes}
           documentId={documentId}
-          documentTitle={document?.title}
+          documentTitle={epubDoc?.title}
           onAnnotationCreated={fetchAnnotations}
           seedMessages={seedMessages}
           onSeedMessagesConsumed={() => setSeedMessages(null)}
@@ -836,13 +921,24 @@ export function EpubReader({
           notes={notes}
           onNotesChange={setNotes}
           documentId={documentId}
-          documentTitle={document?.title}
+          documentTitle={epubDoc?.title}
           onAnnotationCreated={fetchAnnotations}
           seedMessages={seedMessages}
           onSeedMessagesConsumed={() => setSeedMessages(null)}
           scrollToQuoteText={scrollToQuoteText}
           onScrollToQuoteComplete={() => setScrollToQuoteText(null)}
           onQuoteClick={handleQuoteClick}
+        />
+      )}
+
+      {/* Comment Popover */}
+      {activeComment && (
+        <CommentPopover
+          annotation={activeComment.annotation}
+          position={activeComment.position}
+          onClose={() => setActiveComment(null)}
+          onEdit={handleEditComment}
+          onDelete={handleDeleteComment}
         />
       )}
     </div>

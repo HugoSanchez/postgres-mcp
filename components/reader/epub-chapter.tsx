@@ -37,7 +37,8 @@ interface EpubChapterProps {
   }) => Promise<void>;
   onAskAI?: (data: { selectedText: string; startOffset: number; endOffset: number }) => void;
   onAddToNotes?: (data: { selectedText: string; startOffset: number; endOffset: number }) => void;
-  onAnnotationClick?: (annotation: AnnotationRow) => void;
+  onAddComment?: (data: { selectedText: string; startOffset: number; endOffset: number; text: string }) => void;
+  onAnnotationClick?: (annotation: AnnotationRow, position: { x: number; y: number }) => void;
 }
 
 /**
@@ -81,6 +82,7 @@ export function EpubChapter({
   onCreateHighlight,
   onAskAI,
   onAddToNotes,
+  onAddComment,
   onAnnotationClick,
 }: EpubChapterProps) {
   const contentRef = useRef<HTMLDivElement>(null);
@@ -289,14 +291,20 @@ export function EpubChapter({
 
     const handleClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
-      const annotationElement = target.closest('[data-annotation-id]');
+      const annotationElement = target.closest('[data-annotation-id]') as HTMLElement | null;
       if (annotationElement) {
         const annotationId = annotationElement.getAttribute('data-annotation-id');
         const annotation = annotations.find(a => a.id === annotationId);
         if (annotation) {
           e.preventDefault();
           e.stopPropagation();
-          onAnnotationClick(annotation);
+          // Calculate position for popover
+          const rect = annotationElement.getBoundingClientRect();
+          const position = {
+            x: rect.left + rect.width / 2,
+            y: rect.top,
+          };
+          onAnnotationClick(annotation, position);
         }
       }
     };
@@ -366,13 +374,24 @@ export function EpubChapter({
     onAddToNotes({ selectedText: text, startOffset, endOffset });
   }, [onAddToNotes, removePendingMark]);
 
+  const handleAddComment = useCallback((commentText: string) => {
+    const pending = pendingHighlightRef.current;
+    if (!pending || !onAddComment) return;
+
+    const { text, startOffset, endOffset } = pending;
+    // Remove the pending mark since we're creating an annotation, not a highlight
+    removePendingMark();
+    setPopoverData(null);
+    onAddComment({ selectedText: text, startOffset, endOffset, text: commentText });
+  }, [onAddComment, removePendingMark]);
+
   // Get icon component for annotation type
   const getAnnotationIcon = (type: string) => {
     switch (type) {
       case 'qa':
-        return MessageSquareText;
-      case 'comment':
         return MessageCircle;
+      case 'comment':
+        return MessageSquareText;
       case 'marker':
         return Bookmark;
       case 'note-quote':
@@ -384,10 +403,15 @@ export function EpubChapter({
 
   // Get color classes for annotation type
   const getAnnotationColors = (type: string) => {
-    if (type === 'note-quote') {
-      return 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-200 dark:hover:bg-emerald-900/50 border-emerald-200 dark:border-emerald-800';
+    switch (type) {
+      case 'note-quote':
+        return 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-200 dark:hover:bg-emerald-900/50 border-emerald-200 dark:border-emerald-800';
+      case 'comment':
+        return 'bg-violet-100 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400 hover:bg-violet-200 dark:hover:bg-violet-900/50 border-violet-200 dark:border-violet-800';
+      case 'qa':
+      default:
+        return 'bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400 hover:bg-orange-200 dark:hover:bg-orange-900/50 border-orange-200 dark:border-orange-800';
     }
-    return 'bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400 hover:bg-orange-200 dark:hover:bg-orange-900/50 border-orange-200 dark:border-orange-800';
   };
 
   // Get title for annotation type
@@ -447,7 +471,14 @@ export function EpubChapter({
               <button
                 key={marker.id}
                 type="button"
-                onClick={() => onAnnotationClick?.(marker.annotation)}
+                onClick={(e) => {
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  const position = {
+                    x: rect.left,
+                    y: rect.top + rect.height / 2,
+                  };
+                  onAnnotationClick?.(marker.annotation, position);
+                }}
                 className={`absolute pointer-events-auto p-1.5 rounded-full hover:scale-110 transition-all shadow-sm border ${getAnnotationColors(marker.type)}`}
                 style={{
                   top: marker.top - 4,
@@ -468,6 +499,7 @@ export function EpubChapter({
           onSelectColor={handleSelectColor}
           onAskAI={handleAskAI}
           onAddToNotes={handleAddToNotes}
+          onAddComment={onAddComment ? handleAddComment : undefined}
           onClose={handleClosePopover}
           isLoading={isCreatingHighlight}
         />
