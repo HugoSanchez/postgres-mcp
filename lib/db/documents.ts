@@ -1,13 +1,19 @@
 import 'server-only';
 
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 
 import {
+  annotation as annotationTable,
   document as documentTable,
   documentOutline as documentOutlineTable,
   documentPage as documentPageTable,
+  documentNote as documentNoteTable,
+  epubChapter as epubChapterTable,
+  highlight as highlightTable,
+  readingProgress as readingProgressTable,
+  suggestion as suggestionTable,
 } from './schema';
 
 import type {
@@ -73,3 +79,78 @@ export async function getDocumentWithPages(documentId: string) {
   return { doc, pages, outline };
 }
 
+export async function getDocumentById(documentId: string) {
+  const [doc] = await db
+    .select()
+    .from(documentTable)
+    .where(eq(documentTable.id, documentId))
+    .limit(1);
+  return doc ?? null;
+}
+
+export async function renameDocument(
+  documentId: string,
+  title: string
+) {
+  const [updated] = await db
+    .update(documentTable)
+    .set({ title, updatedAt: new Date() })
+    .where(eq(documentTable.id, documentId))
+    .returning();
+  return updated ?? null;
+}
+
+export async function deleteDocumentById(documentId: string) {
+  return db.transaction(async (tx) => {
+    const [doc] = await tx
+      .select()
+      .from(documentTable)
+      .where(eq(documentTable.id, documentId))
+      .limit(1);
+
+    if (!doc) return false;
+
+    await tx
+      .delete(suggestionTable)
+      .where(
+        and(
+          eq(suggestionTable.documentId, documentId),
+          eq(suggestionTable.documentCreatedAt, doc.createdAt)
+        )
+      );
+
+    await tx
+      .delete(documentOutlineTable)
+      .where(eq(documentOutlineTable.documentId, documentId));
+
+    await tx
+      .delete(documentPageTable)
+      .where(eq(documentPageTable.documentId, documentId));
+
+    await tx
+      .delete(epubChapterTable)
+      .where(eq(epubChapterTable.documentId, documentId));
+
+    await tx
+      .delete(highlightTable)
+      .where(eq(highlightTable.documentId, documentId));
+
+    await tx
+      .delete(annotationTable)
+      .where(eq(annotationTable.documentId, documentId));
+
+    await tx
+      .delete(documentNoteTable)
+      .where(eq(documentNoteTable.documentId, documentId));
+
+    await tx
+      .delete(readingProgressTable)
+      .where(eq(readingProgressTable.documentId, documentId));
+
+    await tx
+      .delete(documentTable)
+      .where(eq(documentTable.id, documentId));
+
+    return true;
+  });
+}

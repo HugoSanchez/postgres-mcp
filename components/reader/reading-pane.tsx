@@ -2,7 +2,7 @@
 
 import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { BookOpen, Globe, Loader2, Upload, X } from 'lucide-react';
+import { BookOpen, Globe, Loader2, Upload } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { toast } from 'sonner';
 
@@ -11,29 +11,11 @@ import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { useSidebar } from '../ui/sidebar';
 
-// Type for the article response from our API
-type ArticleResponse = {
-  title: string;
-  content: string;
-  byline: string | null;
-  excerpt: string | null;
-  url: string;
-  length: number;
-};
-
-type ViewMode = 'input' | 'article';
-
 export function ReadingPane() {
   const router = useRouter();
   const [url, setUrl] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  // View mode: input (default) or article
-  const [viewMode, setViewMode] = useState<ViewMode>('input');
-
-  // Article state: stores the fetched article info
-  const [article, setArticle] = useState<ArticleResponse | null>(null);
 
   // EPUB upload state
   const [isUploadingEpub, setIsUploadingEpub] = useState(false);
@@ -48,7 +30,6 @@ export function ReadingPane() {
     }
 
     setError(null);
-    setArticle(null);
     setIsLoading(true);
 
     try {
@@ -65,9 +46,9 @@ export function ReadingPane() {
         throw new Error(body.error || 'Failed to fetch article');
       }
 
-      const data = (await res.json()) as ArticleResponse;
-      setArticle(data);
-      setViewMode('article');
+      const data = (await res.json()) as { documentId: string; title?: string };
+      toast.success(`Loaded "${data.title || 'Article'}"`);
+      router.push(`/read/${data.documentId}?fromUpload=1`);
     } catch (err) {
       const message =
         err instanceof Error ? err.message : 'Failed to fetch article';
@@ -117,7 +98,7 @@ export function ReadingPane() {
       const data = await res.json();
       toast.success(`Loaded "${data.title || file.name}"`);
       // Navigate to the read route
-      router.push(`/read/${data.documentId}`);
+      router.push(`/read/${data.documentId}?fromUpload=1`);
     } catch (err) {
       const message =
         err instanceof Error ? err.message : 'Failed to upload EPUB';
@@ -132,63 +113,6 @@ export function ReadingPane() {
     }
   };
 
-  // Clear state and return to input mode
-  const clearContent = () => {
-    setArticle(null);
-    setUrl('');
-    setError(null);
-    setViewMode('input');
-  };
-
-  // Render article reader when article is loaded
-  if (viewMode === 'article' && article) {
-    return (
-      <motion.div
-        className="relative bg-accent flex flex-1 flex-col overflow-hidden"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.2 }}
-      >
-        {!open && (
-          <div className="absolute left-2 top-2 z-10">
-            <SidebarToggle className="md:px-2 md:h-fit" />
-          </div>
-        )}
-
-        {/* Article Header */}
-        <div className="flex items-center justify-between border-b bg-background/80 px-4 py-2 backdrop-blur-sm">
-          <div className="flex items-center gap-2 min-w-0">
-            <Globe className="size-4 text-muted-foreground shrink-0" />
-            <span className="text-sm font-medium text-foreground truncate">
-              {article.title}
-            </span>
-            {article.byline && (
-              <span className="text-xs text-muted-foreground truncate">
-                • {article.byline}
-              </span>
-            )}
-          </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={clearContent}
-            className="size-8 p-0 shrink-0"
-          >
-            <X className="size-4" />
-          </Button>
-        </div>
-
-        {/* Article Content */}
-        <div className="flex flex-1 overflow-auto">
-          <div className="w-full max-w-3xl mx-auto p-6 prose prose-lg dark:prose-invert prose-headings:font-semibold prose-a:text-primary prose-img:rounded-lg prose-img:shadow-md [&_svg]:max-w-[10px] [&_svg]:max-h-[24px] [&_svg]:inline-block [&_svg]:align-middle [&_table]:overflow-x-auto [&_table]:block [&_table]:w-full">
-            <div dangerouslySetInnerHTML={{ __html: article.content }} />
-          </div>
-        </div>
-      </motion.div>
-    );
-  }
-
-  // Render input UI when no content is loaded
   return (
     <motion.div
       className="relative bg-accent flex flex-1 items-center justify-center p-6"
@@ -218,7 +142,7 @@ export function ReadingPane() {
                 Enter an article URL
               </p>
               <p className="text-sm text-muted-foreground">
-                Paste a URL to read articles, blog posts, or newsletters
+                Paste a URL to import an article into the reader
               </p>
             </div>
 

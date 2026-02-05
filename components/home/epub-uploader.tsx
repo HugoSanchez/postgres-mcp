@@ -2,7 +2,7 @@
 
 import { useRef, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { BookOpen, Upload, Loader2 } from 'lucide-react';
+import { BookOpen, Loader2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { toast } from 'sonner';
 
@@ -44,7 +44,7 @@ export function EpubUploader() {
 
         const data = await res.json();
         toast.success(`Loaded "${data.title || file.name}"`);
-        router.push(`/read/${data.documentId}`);
+        router.push(`/read/${data.documentId}?fromUpload=1`);
       } catch (err) {
         const message =
           err instanceof Error ? err.message : 'Failed to upload EPUB';
@@ -95,7 +95,7 @@ export function EpubUploader() {
   return (
     <motion.div
       className={cn(
-        'relative w-full max-w-md rounded-2xl border-2 border-dashed p-8 transition-colors',
+        'relative w-full rounded-2xl border-2 border-dashed p-8 transition-colors',
         isDragging
           ? 'border-primary bg-primary/5'
           : 'border-muted-foreground/25 hover:border-muted-foreground/50'
@@ -103,6 +103,7 @@ export function EpubUploader() {
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
+      onClick={() => fileInputRef.current?.click()}
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, delay: 0.1 }}
@@ -143,25 +144,6 @@ export function EpubUploader() {
           className="hidden"
           disabled={isUploading}
         />
-
-        <Button
-          variant="outline"
-          onClick={() => fileInputRef.current?.click()}
-          disabled={isUploading}
-          className="mt-2"
-        >
-          {isUploading ? (
-            <>
-              <Loader2 className="mr-2 size-4 animate-spin" />
-              Processing...
-            </>
-          ) : (
-            <>
-              <Upload className="mr-2 size-4" />
-              Select EPUB
-            </>
-          )}
-        </Button>
       </div>
     </motion.div>
   );

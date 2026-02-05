@@ -1,6 +1,4 @@
-import { Suspense } from 'react';
 import { notFound } from 'next/navigation';
-import { Loader2 } from 'lucide-react';
 
 import { auth } from '@/app/(auth)/auth';
 import { getEpubWithChapters } from '@/lib/db/epub';
@@ -9,7 +7,7 @@ import { EpubReaderWithUrl } from '@/components/reader/epub-reader-with-url';
 
 interface ReadPageProps {
   params: Promise<{ documentId: string }>;
-  searchParams: Promise<{ chapter?: string }>;
+  searchParams: Promise<{ chapter?: string; fromUpload?: string }>;
 }
 
 export default async function ReadPage({ params, searchParams }: ReadPageProps) {
@@ -19,7 +17,8 @@ export default async function ReadPage({ params, searchParams }: ReadPageProps) 
   }
 
   const { documentId } = await params;
-  const { chapter } = await searchParams;
+  const { chapter, fromUpload } = await searchParams;
+  const isFromUpload = fromUpload === '1' || fromUpload === 'true';
 
   // Verify document exists and belongs to user
   const epub = await getEpubWithChapters(documentId);
@@ -43,21 +42,18 @@ export default async function ReadPage({ params, searchParams }: ReadPageProps) 
     initialScrollPosition = savedProgress.scrollPosition ?? 0;
   }
 
+  const documentType =
+    epub.doc.mimeType === 'text/html' ? 'article' : 'epub';
+
   return (
     <div className="h-dvh w-full bg-background">
-      <Suspense
-        fallback={
-          <div className="flex h-full items-center justify-center">
-            <Loader2 className="size-8 animate-spin text-muted-foreground" />
-          </div>
-        }
-      >
-        <EpubReaderWithUrl
-          documentId={documentId}
-          initialChapter={initialChapter}
-          initialScrollPosition={initialScrollPosition}
-        />
-      </Suspense>
+      <EpubReaderWithUrl
+        documentId={documentId}
+        initialChapter={initialChapter}
+        initialScrollPosition={initialScrollPosition}
+        fromUpload={isFromUpload}
+        documentType={documentType}
+      />
     </div>
   );
 }

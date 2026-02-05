@@ -8,6 +8,8 @@ interface EpubReaderWithUrlProps {
   documentId: string;
   initialChapter: number;
   initialScrollPosition: number;
+  fromUpload?: boolean;
+  documentType?: 'epub' | 'article' | 'pdf';
 }
 
 /**
@@ -19,6 +21,8 @@ export function EpubReaderWithUrl({
   documentId,
   initialChapter,
   initialScrollPosition,
+  fromUpload = false,
+  documentType = 'epub',
 }: EpubReaderWithUrlProps) {
   const router = useRouter();
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -43,16 +47,19 @@ export function EpubReaderWithUrl({
 
       saveTimeoutRef.current = setTimeout(async () => {
         try {
-          await fetch('/api/reading-progress', {
+          const res = await fetch('/api/reader/progress', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               documentId,
-              documentType: 'epub',
+              documentType,
               chapterIndex,
               scrollPosition,
             }),
           });
+          if (res.ok) {
+            window.dispatchEvent(new Event('reading-progress-updated'));
+          }
         } catch (error) {
           console.error('Failed to save reading progress:', error);
         }
@@ -70,6 +77,8 @@ export function EpubReaderWithUrl({
       documentId={documentId}
       initialChapter={initialChapter}
       initialScrollPosition={initialScrollPosition}
+      fromUpload={fromUpload}
+      documentType={documentType}
       onClose={handleClose}
       onChapterChange={handleChapterChange}
       onProgressChange={handleProgressChange}

@@ -14,11 +14,19 @@ import { Readability } from '@mozilla/readability';
 import { parseHTML } from 'linkedom';
 import createDOMPurify from 'dompurify';
 import { NextResponse } from 'next/server';
+import { createHash, randomUUID } from 'node:crypto';
+import { put } from '@vercel/blob';
 
+import { auth } from '@/app/(auth)/auth';
+import { createEpubWithChapters } from '@/lib/db/epub';
+import { findDocumentByChecksum } from '@/lib/db/documents';
 import { convertRelativeUrls } from '@/lib/reader/url-converter';
 
 // Maximum content length to prevent memory issues (10MB)
 const MAX_CONTENT_LENGTH = 10 * 1024 * 1024;
+const MAX_IMAGES = 25;
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const IMAGE_BATCH_SIZE = 8;
 
 // Request timeout (30 seconds)
 const REQUEST_TIMEOUT = 30000;
@@ -33,6 +41,11 @@ const REQUEST_TIMEOUT = 30000;
  */
 export async function POST(request: Request) {
   try {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     // ============================================================================
     // STEP 1: Parse and Validate Request Body
     // ============================================================================
@@ -71,6 +84,7 @@ export async function POST(request: Request) {
     const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
 
     let html: string;
+    let finalUrl = url;
     try {
       const response = await fetch(url, {
         signal: controller.signal,
@@ -100,6 +114,7 @@ export async function POST(request: Request) {
         );
       }
 
+      finalUrl = response.url || url;
       html = await response.text();
 
       // Check actual content length
@@ -121,13 +136,27 @@ export async function POST(request: Request) {
     }
 
     // ============================================================================
-    // STEP 3: Parse HTML with linkedom
+    // STEP 3: Deduplicate by canonical URL (per user)
+    // ============================================================================
+    const checksumSha256 = createHash('sha256')
+      .update(finalUrl)
+      .digest('hex');
+    const existingDoc = await findDocumentByChecksum(checksumSha256);
+    if (existingDoc && existingDoc.userId === session.user.id) {
+      return NextResponse.json(
+        { documentId: existingDoc.id, title: existingDoc.title },
+        { status: 200 }
+      );
+    }
+
+    // ============================================================================
+    // STEP 4: Parse HTML with linkedom
     // ============================================================================
     // linkedom is a lighter, faster alternative to jsdom that works better with Next.js
     const { document, window } = parseHTML(html);
 
     // ============================================================================
-    // STEP 4: Extract Article Content with Readability
+    // STEP 5: Extract Article Content with Readability
     // ============================================================================
     const reader = new Readability(document);
     const article = reader.parse();
@@ -140,7 +169,7 @@ export async function POST(request: Request) {
     }
 
     // ============================================================================
-    // STEP 4.5: Preserve tables - Readability sometimes converts them
+    // STEP 5.5: Preserve tables - Readability sometimes converts them
     // ============================================================================
     let finalContent = article.content;
 
@@ -195,18 +224,97 @@ export async function POST(request: Request) {
     }
 
     // ============================================================================
-    // STEP 5: Convert Relative URLs to Absolute URLs
+    // STEP 6: Convert Relative URLs to Absolute URLs
     // ============================================================================
-    const contentWithAbsoluteUrls = convertRelativeUrls(finalContent, url);
+    const contentWithAbsoluteUrls = convertRelativeUrls(finalContent, finalUrl);
 
     // ============================================================================
-    // STEP 6: Sanitize HTML for Safe Rendering
+    // STEP 7: Download/Proxy Images into Blob and Rewrite URLs
+    // ============================================================================
+    const { document: contentDoc } = parseHTML(
+      `<div id="content-root">${contentWithAbsoluteUrls}</div>`
+    );
+    const container = contentDoc.getElementById('content-root');
+
+    if (container) {
+      normalizeEscapedBlockquotes(container);
+    }
+
+    const imageElements = Array.from(container?.querySelectorAll('img') || []);
+    const imageUrls = imageElements
+      .map((img) => img.getAttribute('src') || '')
+      .filter((src) => src.startsWith('http://') || src.startsWith('https://'))
+      .filter((src, index, arr) => arr.indexOf(src) === index)
+      .slice(0, MAX_IMAGES);
+
+    const imageUrlMap: Record<string, string> = {};
+    const imageId = randomUUID();
+
+    for (let i = 0; i < imageUrls.length; i += IMAGE_BATCH_SIZE) {
+      const batch = imageUrls.slice(i, i + IMAGE_BATCH_SIZE);
+      const uploads = batch.map(async (imageUrl, index) => {
+        try {
+          const response = await fetch(imageUrl, {
+            headers: {
+              'User-Agent':
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            },
+          });
+
+          if (!response.ok) return null;
+
+          const contentType = response.headers.get('content-type') || '';
+          if (!contentType.startsWith('image/')) return null;
+
+          const contentLength = response.headers.get('content-length');
+          if (contentLength && Number.parseInt(contentLength, 10) > MAX_IMAGE_BYTES) {
+            return null;
+          }
+
+          const buffer = Buffer.from(await response.arrayBuffer());
+          if (buffer.length > MAX_IMAGE_BYTES) return null;
+
+          const ext = contentType.split('/')[1]?.split(';')[0] || 'img';
+          const imagePath = `article-images/${imageId}/${i + index}.${ext}`;
+          const result = await put(imagePath, buffer, {
+            access: 'public',
+            contentType,
+          });
+          return { imageUrl, blobUrl: result.url };
+        } catch {
+          return null;
+        }
+      });
+
+      const results = await Promise.all(uploads);
+      for (const result of results) {
+        if (result) {
+          imageUrlMap[result.imageUrl] = result.blobUrl;
+        }
+      }
+    }
+
+    for (const img of imageElements) {
+      const src = img.getAttribute('src') || '';
+      const blobUrl = imageUrlMap[src];
+      if (blobUrl) {
+        img.setAttribute('src', blobUrl);
+        img.removeAttribute('srcset');
+      }
+    }
+
+    const contentWithImages = container
+      ? container.innerHTML
+      : contentWithAbsoluteUrls;
+
+    // ============================================================================
+    // STEP 8: Sanitize HTML for Safe Rendering
     // ============================================================================
     // Configure DOMPurify to work with linkedom's window object
     const DOMPurify = createDOMPurify(window as unknown as Window);
 
     // Allow common article elements but strip dangerous content
-    const sanitizedContent = DOMPurify.sanitize(contentWithAbsoluteUrls, {
+    const sanitizedContent = DOMPurify.sanitize(contentWithImages, {
       ALLOWED_TAGS: [
         'p',
         'br',
@@ -269,18 +377,49 @@ export async function POST(request: Request) {
     });
 
     // ============================================================================
-    // STEP 7: Return Structured Article Data
+    // STEP 9: Persist Article as a Single-Chapter Document
     // ============================================================================
+    const now = new Date();
+    const documentId = randomUUID();
+
+    const contentText =
+      article.textContent?.trim() ||
+      (container?.textContent?.trim() ?? '');
+
+    await createEpubWithChapters({
+      document: {
+        id: documentId,
+        createdAt: now,
+        updatedAt: now,
+        title: article.title || 'Untitled',
+        originalFilename: finalUrl,
+        mimeType: 'text/html',
+        sizeBytes: html.length,
+        blobUrl: null,
+        checksumSha256,
+        pageCount: 1,
+        userId: session.user.id,
+      },
+      chapters: [
+        {
+          documentId,
+          spineIndex: 0,
+          href: finalUrl,
+          title: article.title || 'Untitled',
+          html: sanitizedContent,
+          text: contentText,
+          createdAt: now,
+        },
+      ],
+    });
+
     return NextResponse.json(
       {
+        documentId,
         title: article.title || 'Untitled',
-        content: sanitizedContent,
-        byline: article.byline || null,
-        excerpt: article.excerpt || null,
-        url: url,
-        length: article.length || 0,
+        url: finalUrl,
       },
-      { status: 200 },
+      { status: 200 }
     );
   } catch (error) {
     // ============================================================================
@@ -299,3 +438,49 @@ export async function POST(request: Request) {
   }
 }
 
+function normalizeEscapedBlockquotes(container: HTMLElement) {
+  const children = Array.from(container.childNodes);
+  const output: Node[] = [];
+  const doc = container.ownerDocument || container;
+
+  const isMarker = (node: Node, marker: string) => {
+    if (node.nodeType === 1) {
+      const el = node as Element;
+      if (el.closest('code, pre')) return false;
+      const text = el.textContent?.trim().toLowerCase();
+      return text === marker;
+    }
+    if (node.nodeType === 3) {
+      const text = node.textContent?.trim().toLowerCase();
+      return text === marker;
+    }
+    return false;
+  };
+
+  let i = 0;
+  while (i < children.length) {
+    const node = children[i];
+
+    if (isMarker(node, '<blockquote>')) {
+      const blockquote = doc.createElement('blockquote');
+      i += 1;
+      while (i < children.length && !isMarker(children[i], '</blockquote>')) {
+        blockquote.appendChild(children[i]);
+        i += 1;
+      }
+      if (i < children.length && isMarker(children[i], '</blockquote>')) {
+        i += 1;
+      }
+      output.push(blockquote);
+      continue;
+    }
+
+    output.push(node);
+    i += 1;
+  }
+
+  container.innerHTML = '';
+  for (const node of output) {
+    container.appendChild(node);
+  }
+}

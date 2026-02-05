@@ -1,7 +1,11 @@
-import { Toaster } from 'sonner';
 import type { Metadata } from 'next';
+import { cookies } from 'next/headers';
+import { Toaster } from 'sonner';
 import { Geist, Geist_Mono, Newsreader } from 'next/font/google';
 import { ThemeProvider } from '@/components/theme-provider';
+import { AppSidebar } from '@/components/app-sidebar';
+import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar';
+import { auth } from '@/app/(auth)/auth';
 
 import './globals.css';
 
@@ -58,6 +62,9 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const [session, cookieStore] = await Promise.all([auth(), cookies()]);
+  const isCollapsed = cookieStore.get('sidebar:state')?.value !== 'true';
+
   return (
     <html
       lang="en"
@@ -82,8 +89,11 @@ export default async function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
+          <SidebarProvider defaultOpen={!isCollapsed}>
+            <AppSidebar user={session?.user} />
+            <SidebarInset>{children}</SidebarInset>
+          </SidebarProvider>
           <Toaster position="top-center" />
-          {children}
         </ThemeProvider>
       </body>
     </html>

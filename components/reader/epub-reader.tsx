@@ -1,12 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState, useRef } from 'react';
-import {
-  BookOpen,
-  List,
-  Loader2,
-  X,
-} from 'lucide-react';
+import { BookOpen, List, X } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 import { Button } from '../ui/button';
@@ -20,8 +15,17 @@ import { EpubChapter } from './epub-chapter';
 import { CommentPopover } from './comment-popover';
 import { SidePanel } from './side-panel';
 import { MobilePanel } from './mobile-panel';
+import { SidebarToggle } from '../sidebar-toggle';
+import { useSidebar } from '../ui/sidebar';
+import { LineSpinner } from '../ui/line-spinner';
 import { useIsMobile } from '@/hooks/use-mobile';
-import type { HighlightRow, HighlightColor, EpubHighlightAnchor, AnnotationRow } from '@/lib/db/types';
+import { cn } from '@/lib/utils';
+import type {
+  HighlightRow,
+  HighlightColor,
+  EpubHighlightAnchor,
+  AnnotationRow,
+} from '@/lib/db/types';
 
 interface ChapterMeta {
   id: string;
@@ -57,15 +61,19 @@ interface EpubReaderProps {
   documentId: string;
   initialChapter?: number;
   initialScrollPosition?: number;
+  fromUpload?: boolean;
+  documentType?: 'epub' | 'article' | 'pdf';
   onClose: () => void;
-  onChapterChange?: (chapterIndex: number) => void;
-  onProgressChange?: (chapterIndex: number, scrollPosition: number) => void;
+  onChapterChange?: (spineIndex: number) => void;
+  onProgressChange?: (spineIndex: number, scrollPosition: number) => void;
 }
 
 export function EpubReader({
   documentId,
   initialChapter = 0,
   initialScrollPosition = 0,
+  fromUpload = false,
+  documentType = 'epub',
   onClose,
   onChapterChange,
   onProgressChange,
@@ -76,9 +84,13 @@ export function EpubReader({
   const [outline, setOutline] = useState<OutlineItem[]>([]);
 
   // Loaded chapters (for infinite scroll)
-  const [loadedChapters, setLoadedChapters] = useState<Map<number, ChapterContent>>(new Map());
-  const [visibleChapterIndices, setVisibleChapterIndices] = useState<number[]>([]);
-  const [currentChapterIndex, setCurrentChapterIndex] = useState(initialChapter);
+  const [loadedChapters, setLoadedChapters] = useState<
+    Map<number, ChapterContent>
+  >(new Map());
+  const [visibleChapterIndices, setVisibleChapterIndices] = useState<number[]>(
+    [],
+  );
+  const [currentChapterIndex, setCurrentChapterIndex] = useState(0);
 
   // Loading states
   const [isLoadingDoc, setIsLoadingDoc] = useState(true);
@@ -86,29 +98,41 @@ export function EpubReader({
   const [error, setError] = useState<string | null>(null);
 
   // Highlights state (per chapter)
-  const [highlightsByChapter, setHighlightsByChapter] = useState<Map<number, HighlightRow[]>>(new Map());
+  const [highlightsByChapter, setHighlightsByChapter] = useState<
+    Map<number, HighlightRow[]>
+  >(new Map());
 
   // Annotations state (per chapter)
-  const [annotationsByChapter, setAnnotationsByChapter] = useState<Map<number, AnnotationRow[]>>(new Map());
+  const [annotationsByChapter, setAnnotationsByChapter] = useState<
+    Map<number, AnnotationRow[]>
+  >(new Map());
 
   // Scroll tracking
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const loadMoreTriggerRef = useRef<HTMLDivElement>(null);
   const chapterRefs = useRef<Map<number, HTMLDivElement>>(new Map());
-  const shouldRestoreScroll = useRef(initialChapter === 0 && initialScrollPosition > 0);
+  const shouldRestoreScroll = useRef(initialScrollPosition > 0);
   const hasRestoredScroll = useRef(false);
+  const hasSentInitialProgress = useRef(false);
 
   // Side panel state
   const isMobile = useIsMobile();
+  const { open } = useSidebar();
   const [panelOpen, setPanelOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'chat' | 'notes'>('chat');
   const [chatContext, setChatContext] = useState('');
-  const [chatContextAnchor, setChatContextAnchor] = useState<EpubHighlightAnchor | null>(null);
+  const [chatContextAnchor, setChatContextAnchor] =
+    useState<EpubHighlightAnchor | null>(null);
   const [notes, setNotes] = useState('');
   const [noteId, setNoteId] = useState<string | null>(null);
-  const [seedMessages, setSeedMessages] = useState<{ question: string; answer: string } | null>(null);
-  const [scrollToQuoteText, setScrollToQuoteText] = useState<string | null>(null);
+  const [seedMessages, setSeedMessages] = useState<{
+    question: string;
+    answer: string;
+  } | null>(null);
+  const [scrollToQuoteText, setScrollToQuoteText] = useState<string | null>(
+    null,
+  );
   const [activeComment, setActiveComment] = useState<{
     annotation: AnnotationRow;
     position: { x: number; y: number };
@@ -145,7 +169,9 @@ export function EpubReader({
         setChapters(data.chapters);
         setOutline(data.outline);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load document');
+        setError(
+          err instanceof Error ? err.message : 'Failed to load document',
+        );
       } finally {
         setIsLoadingDoc(false);
       }
@@ -159,7 +185,7 @@ export function EpubReader({
     async function fetchNotes() {
       try {
         const res = await fetch(
-          `/api/reader/notes?documentId=${documentId}&documentType=epub`
+          `/api/reader/notes?documentId=${documentId}&documentType=${documentType}`,
         );
         if (res.ok) {
           const data = await res.json();
@@ -221,7 +247,7 @@ export function EpubReader({
     // Use sendBeacon for reliable delivery even during page unload
     const blob = new Blob(
       [JSON.stringify({ noteId: currentNoteId, content: currentNotes })],
-      { type: 'application/json' }
+      { type: 'application/json' },
     );
     navigator.sendBeacon('/api/reader/notes', blob);
     lastSavedNotesRef.current = currentNotes;
@@ -249,26 +275,34 @@ export function EpubReader({
   }, [saveNotesImmediately]);
 
   // Handle panel open/close - save immediately when closing
-  const handlePanelOpenChange = useCallback((open: boolean) => {
-    if (!open) {
-      // Panel is closing - save immediately
-      saveNotesImmediately();
-    }
-    setPanelOpen(open);
-  }, [saveNotesImmediately]);
+  const handlePanelOpenChange = useCallback(
+    (open: boolean) => {
+      if (!open) {
+        // Panel is closing - save immediately
+        saveNotesImmediately();
+      }
+      setPanelOpen(open);
+    },
+    [saveNotesImmediately],
+  );
+
+  const getSpineIndexForPosition = useCallback(
+    (position: number) => chapters[position]?.spineIndex ?? 0,
+    [chapters],
+  );
 
   // Fetch highlights for a chapter
   const fetchHighlights = useCallback(
-    async (chapterIndex: number) => {
+    async (spineIndex: number) => {
       try {
         const res = await fetch(
-          `/api/reader/highlights?documentId=${documentId}&chapterIndex=${chapterIndex}`
+          `/api/reader/highlights?documentId=${documentId}&chapterIndex=${spineIndex}`,
         );
         if (res.ok) {
           const data = await res.json();
-          setHighlightsByChapter(prev => {
+          setHighlightsByChapter((prev) => {
             const next = new Map(prev);
-            next.set(chapterIndex, data.highlights || []);
+            next.set(spineIndex, data.highlights || []);
             return next;
           });
         }
@@ -276,21 +310,21 @@ export function EpubReader({
         console.error('Failed to fetch highlights:', err);
       }
     },
-    [documentId]
+    [documentId],
   );
 
   // Fetch annotations for a chapter
   const fetchAnnotations = useCallback(
-    async (chapterIndex: number) => {
+    async (spineIndex: number) => {
       try {
         const res = await fetch(
-          `/api/reader/annotations?documentId=${documentId}&chapterIndex=${chapterIndex}`
+          `/api/reader/annotations?documentId=${documentId}&chapterIndex=${spineIndex}`,
         );
         if (res.ok) {
           const data = await res.json();
-          setAnnotationsByChapter(prev => {
+          setAnnotationsByChapter((prev) => {
             const next = new Map(prev);
-            next.set(chapterIndex, data.annotations || []);
+            next.set(spineIndex, data.annotations || []);
             return next;
           });
         }
@@ -298,18 +332,23 @@ export function EpubReader({
         console.error('Failed to fetch annotations:', err);
       }
     },
-    [documentId]
+    [documentId],
   );
 
-  // Fetch chapter content
+  // Fetch chapter content (position-based, but API expects spineIndex)
   const fetchChapter = useCallback(
-    async (index: number): Promise<ChapterContent | null> => {
+    async (position: number): Promise<ChapterContent | null> => {
       // Return cached chapter if available
-      const cached = loadedChapters.get(index);
+      const cached = loadedChapters.get(position);
       if (cached) return cached;
 
+      const chapterMeta = chapters[position];
+      if (!chapterMeta) return null;
+
       try {
-        const res = await fetch(`/api/reader/epub/${documentId}?chapter=${index}`);
+        const res = await fetch(
+          `/api/reader/epub/${documentId}?chapter=${chapterMeta.spineIndex}`,
+        );
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
           throw new Error(body.error || 'Failed to load chapter');
@@ -319,15 +358,15 @@ export function EpubReader({
         const chapter = data.chapter as ChapterContent;
 
         // Cache the chapter
-        setLoadedChapters(prev => {
+        setLoadedChapters((prev) => {
           const next = new Map(prev);
-          next.set(index, chapter);
+          next.set(position, chapter);
           return next;
         });
 
         // Fetch highlights and annotations for this chapter
-        fetchHighlights(index);
-        fetchAnnotations(index);
+        fetchHighlights(chapterMeta.spineIndex);
+        fetchAnnotations(chapterMeta.spineIndex);
 
         return chapter;
       } catch (err) {
@@ -335,22 +374,48 @@ export function EpubReader({
         return null;
       }
     },
-    [documentId, loadedChapters, fetchHighlights, fetchAnnotations]
+    [documentId, loadedChapters, fetchHighlights, fetchAnnotations, chapters],
   );
 
   // Load initial chapter when document is loaded
   useEffect(() => {
     if (chapters.length > 0 && visibleChapterIndices.length === 0) {
-      const startChapter = Math.min(initialChapter, chapters.length - 1);
+      const desiredPosition = chapters.findIndex(
+        (ch) => ch.spineIndex === initialChapter,
+      );
+      const startChapter = desiredPosition >= 0 ? desiredPosition : 0;
       setIsLoadingMore(true);
       fetchChapter(startChapter).then(() => {
         setVisibleChapterIndices([startChapter]);
         setCurrentChapterIndex(startChapter);
-        onChapterChange?.(startChapter);
+        onChapterChange?.(getSpineIndexForPosition(startChapter));
         setIsLoadingMore(false);
       });
     }
-  }, [chapters, visibleChapterIndices.length, fetchChapter, initialChapter, onChapterChange]);
+  }, [
+    chapters,
+    visibleChapterIndices.length,
+    fetchChapter,
+    initialChapter,
+    onChapterChange,
+    getSpineIndexForPosition,
+  ]);
+
+  // Seed initial progress so new reads appear in the sidebar
+  useEffect(() => {
+    if (!onProgressChange || hasSentInitialProgress.current) return;
+    if (visibleChapterIndices.length === 0) return;
+
+    const spineIndex = getSpineIndexForPosition(currentChapterIndex);
+    onProgressChange(spineIndex, initialScrollPosition);
+    hasSentInitialProgress.current = true;
+  }, [
+    onProgressChange,
+    visibleChapterIndices.length,
+    currentChapterIndex,
+    initialScrollPosition,
+    getSpineIndexForPosition,
+  ]);
 
   // Load more chapters when scrolling near bottom (intersection observer)
   useEffect(() => {
@@ -360,22 +425,27 @@ export function EpubReader({
     const observer = new IntersectionObserver(
       (entries) => {
         const entry = entries[0];
-        if (entry.isIntersecting && !isLoadingMore && visibleChapterIndices.length > 0) {
-          const lastVisibleIndex = visibleChapterIndices[visibleChapterIndices.length - 1];
+        if (
+          entry.isIntersecting &&
+          !isLoadingMore &&
+          visibleChapterIndices.length > 0
+        ) {
+          const lastVisibleIndex =
+            visibleChapterIndices[visibleChapterIndices.length - 1];
           const nextIndex = lastVisibleIndex + 1;
 
           if (nextIndex < chapters.length) {
             setIsLoadingMore(true);
             fetchChapter(nextIndex).then((chapter) => {
               if (chapter) {
-                setVisibleChapterIndices(prev => [...prev, nextIndex]);
+                setVisibleChapterIndices((prev) => [...prev, nextIndex]);
               }
               setIsLoadingMore(false);
             });
           }
         }
       },
-      { rootMargin: '200px' }
+      { rootMargin: '200px' },
     );
 
     observer.observe(trigger);
@@ -412,57 +482,66 @@ export function EpubReader({
 
       if (mostVisibleIndex !== currentChapterIndex) {
         setCurrentChapterIndex(mostVisibleIndex);
-        onChapterChange?.(mostVisibleIndex);
+        onChapterChange?.(getSpineIndexForPosition(mostVisibleIndex));
       }
     };
 
     container.addEventListener('scroll', handleScroll, { passive: true });
     return () => container.removeEventListener('scroll', handleScroll);
-  }, [visibleChapterIndices, currentChapterIndex, onChapterChange]);
+  }, [
+    visibleChapterIndices,
+    currentChapterIndex,
+    onChapterChange,
+    getSpineIndexForPosition,
+  ]);
 
   // Navigation handler (for TOC)
   const goToChapter = useCallback(
-    async (index: number) => {
-      if (index < 0 || index >= chapters.length) return;
+    async (spineIndex: number) => {
+      const position = chapters.findIndex((ch) => ch.spineIndex === spineIndex);
+      if (position < 0) return;
 
       // If chapter is already loaded and visible, scroll to it
-      if (visibleChapterIndices.includes(index)) {
-        const el = chapterRefs.current.get(index);
+      if (visibleChapterIndices.includes(position)) {
+        const el = chapterRefs.current.get(position);
         el?.scrollIntoView({ behavior: 'smooth' });
         return;
       }
 
       // Otherwise, reset to just this chapter
       setIsLoadingMore(true);
-      const chapter = await fetchChapter(index);
+      const chapter = await fetchChapter(position);
       if (chapter) {
-        setVisibleChapterIndices([index]);
-        setCurrentChapterIndex(index);
-        onChapterChange?.(index);
+        setVisibleChapterIndices([position]);
+        setCurrentChapterIndex(position);
+        onChapterChange?.(spineIndex);
         // Scroll to top
         scrollContainerRef.current?.scrollTo({ top: 0 });
       }
       setIsLoadingMore(false);
     },
-    [chapters.length, visibleChapterIndices, fetchChapter, onChapterChange]
+    [chapters, visibleChapterIndices, fetchChapter, onChapterChange],
   );
 
   // Create highlight handler
   const handleCreateHighlight = useCallback(
-    async (chapterIndex: number, data: {
-      startOffset: number;
-      endOffset: number;
-      selectedText: string;
-      color: HighlightColor;
-    }) => {
+    async (
+      spineIndex: number,
+      data: {
+        startOffset: number;
+        endOffset: number;
+        selectedText: string;
+        color: HighlightColor;
+      },
+    ) => {
       const res = await fetch('/api/reader/highlights', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           documentId,
-          documentType: 'epub',
+          documentType,
           anchor: {
-            chapterIndex,
+            chapterIndex: spineIndex,
             startOffset: data.startOffset,
             endOffset: data.endOffset,
           },
@@ -476,208 +555,263 @@ export function EpubReader({
       }
 
       // Refresh highlights for this chapter
-      fetchHighlights(chapterIndex);
+      fetchHighlights(spineIndex);
     },
-    [documentId, fetchHighlights]
+    [documentId, fetchHighlights],
   );
 
   // Handle Ask AI action from selection
-  const handleAskAI = useCallback((
-    chapterIndex: number,
-    data: { selectedText: string; startOffset: number; endOffset: number }
-  ) => {
-    setChatContext(data.selectedText);
-    setChatContextAnchor({
-      chapterIndex,
-      startOffset: data.startOffset,
-      endOffset: data.endOffset,
-    });
-    setActiveTab('chat');
-    setPanelOpen(true);
-  }, []);
+  const handleAskAI = useCallback(
+    (
+      spineIndex: number,
+      data: { selectedText: string; startOffset: number; endOffset: number },
+    ) => {
+      setChatContext(data.selectedText);
+      setChatContextAnchor({
+        chapterIndex: spineIndex,
+        startOffset: data.startOffset,
+        endOffset: data.endOffset,
+      });
+      setActiveTab('chat');
+      setPanelOpen(true);
+    },
+    [],
+  );
 
   // Handle Add to Notes action from selection
-  const handleAddToNotes = useCallback(async (
-    chapterIndex: number,
-    data: { selectedText: string; startOffset: number; endOffset: number }
-  ) => {
-    // Add quote to notes
-    const quotedText = `> ${data.selectedText}\n\n`;
-    setNotes((prev) => (prev ? `${prev}${quotedText}` : quotedText));
-    setActiveTab('notes');
-    setPanelOpen(true);
+  const handleAddToNotes = useCallback(
+    async (
+      spineIndex: number,
+      data: { selectedText: string; startOffset: number; endOffset: number },
+    ) => {
+      const normalizeNoteSelection = (text: string) =>
+        text
+          .replace(/\[\s*\n\s*(\d+)\s*\]/g, '[$1]')
+          .replace(/\[\s*\n\s*(\d+)\s*\n\s*\]/g, '[$1]')
+          .replace(/\s+\n\s+/g, '\n')
+          .trim();
 
-    // Create note-quote annotation to link the passage to notes
-    try {
-      const res = await fetch('/api/reader/annotations', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          documentId,
-          documentType: 'epub',
-          anchor: {
-            chapterIndex,
-            startOffset: data.startOffset,
-            endOffset: data.endOffset,
-          },
-          selectedText: data.selectedText,
-          type: 'note-quote',
-          content: {},
-        }),
-      });
-
-      if (res.ok) {
-        // Refresh annotations for this chapter to show the marker
-        fetchAnnotations(chapterIndex);
-      }
-    } catch (err) {
-      console.error('Failed to create note-quote annotation:', err);
-    }
-  }, [documentId, fetchAnnotations]);
-
-  // Handle Add Comment action from selection
-  const handleAddComment = useCallback(async (
-    chapterIndex: number,
-    data: { selectedText: string; startOffset: number; endOffset: number; text: string }
-  ) => {
-    try {
-      const res = await fetch('/api/reader/annotations', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          documentId,
-          documentType: 'epub',
-          anchor: {
-            chapterIndex,
-            startOffset: data.startOffset,
-            endOffset: data.endOffset,
-          },
-          selectedText: data.selectedText,
-          type: 'comment',
-          content: { text: data.text },
-        }),
-      });
-
-      if (res.ok) {
-        fetchAnnotations(chapterIndex);
-      }
-    } catch (err) {
-      console.error('Failed to create comment annotation:', err);
-    }
-  }, [documentId, fetchAnnotations]);
-
-  // Handle Edit Comment
-  const handleEditComment = useCallback(async (annotationId: string, newText: string) => {
-    const res = await fetch(`/api/reader/annotations/${annotationId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: { text: newText } }),
-    });
-
-    if (res.ok) {
-      // Refresh annotations for all loaded chapters
-      for (const chapterIndex of visibleChapterIndices) {
-        fetchAnnotations(chapterIndex);
-      }
-      // Update the active comment with new text
-      setActiveComment((prev) => {
-        if (!prev) return null;
-        return {
-          ...prev,
-          annotation: {
-            ...prev.annotation,
-            content: { text: newText },
-          },
-        };
-      });
-    } else {
-      throw new Error('Failed to update comment');
-    }
-  }, [fetchAnnotations, visibleChapterIndices]);
-
-  // Handle Delete Comment
-  const handleDeleteComment = useCallback(async (annotationId: string) => {
-    const res = await fetch(`/api/reader/annotations/${annotationId}`, {
-      method: 'DELETE',
-    });
-
-    if (res.ok) {
-      // Refresh annotations for all loaded chapters
-      for (const chapterIndex of visibleChapterIndices) {
-        fetchAnnotations(chapterIndex);
-      }
-    } else {
-      throw new Error('Failed to delete comment');
-    }
-  }, [fetchAnnotations, visibleChapterIndices]);
-
-  // Handle annotation click - seed the chat with the Q&A, scroll to note quote, or show comment
-  const handleAnnotationClick = useCallback((annotation: AnnotationRow, position: { x: number; y: number }) => {
-    if (annotation.type === 'comment') {
-      // For comments, show the comment popover
-      setActiveComment({ annotation, position });
-    } else if (annotation.type === 'note-quote') {
-      // For note-quote, open notes panel and scroll to the quote
-      setScrollToQuoteText(annotation.selectedText);
+      // Add quote to notes (preserve multi-line selection as blockquote)
+      const normalized = normalizeNoteSelection(data.selectedText);
+      const quotedText = `${normalized
+        .split(/\r?\n/)
+        .map((line) => `> ${line}`)
+        .join('\n')}\n\n`;
+      setNotes((prev) => (prev ? `${prev}${quotedText}` : quotedText));
       setActiveTab('notes');
       setPanelOpen(true);
-    } else {
-      // For QA annotations, seed the chat
-      const content = annotation.content as { question?: string; answer?: string };
-      if (content.question && content.answer) {
-        setSeedMessages({ question: content.question, answer: content.answer });
-        setActiveTab('chat');
-        setPanelOpen(true);
+
+      // Create note-quote annotation to link the passage to notes
+      try {
+        const res = await fetch('/api/reader/annotations', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            documentId,
+            documentType,
+            anchor: {
+              chapterIndex: spineIndex,
+              startOffset: data.startOffset,
+              endOffset: data.endOffset,
+            },
+            selectedText: data.selectedText,
+            type: 'note-quote',
+            content: {},
+          }),
+        });
+
+        if (res.ok) {
+          // Refresh annotations for this chapter to show the marker
+          fetchAnnotations(spineIndex);
+        }
+      } catch (err) {
+        console.error('Failed to create note-quote annotation:', err);
       }
-    }
-  }, []);
+    },
+    [documentId, fetchAnnotations],
+  );
+
+  // Handle Add Comment action from selection
+  const handleAddComment = useCallback(
+    async (
+      spineIndex: number,
+      data: {
+        selectedText: string;
+        startOffset: number;
+        endOffset: number;
+        text: string;
+      },
+    ) => {
+      try {
+        const res = await fetch('/api/reader/annotations', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            documentId,
+            documentType,
+            anchor: {
+              chapterIndex: spineIndex,
+              startOffset: data.startOffset,
+              endOffset: data.endOffset,
+            },
+            selectedText: data.selectedText,
+            type: 'comment',
+            content: { text: data.text },
+          }),
+        });
+
+        if (res.ok) {
+          fetchAnnotations(spineIndex);
+        }
+      } catch (err) {
+        console.error('Failed to create comment annotation:', err);
+      }
+    },
+    [documentId, fetchAnnotations],
+  );
+
+  // Handle Edit Comment
+  const handleEditComment = useCallback(
+    async (annotationId: string, newText: string) => {
+      const res = await fetch(`/api/reader/annotations/${annotationId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: { text: newText } }),
+      });
+
+      if (res.ok) {
+        // Refresh annotations for all loaded chapters
+        for (const position of visibleChapterIndices) {
+          fetchAnnotations(getSpineIndexForPosition(position));
+        }
+        // Update the active comment with new text
+        setActiveComment((prev) => {
+          if (!prev) return null;
+          return {
+            ...prev,
+            annotation: {
+              ...prev.annotation,
+              content: { text: newText },
+            },
+          };
+        });
+      } else {
+        throw new Error('Failed to update comment');
+      }
+    },
+    [fetchAnnotations, visibleChapterIndices, getSpineIndexForPosition],
+  );
+
+  // Handle Delete Comment
+  const handleDeleteComment = useCallback(
+    async (annotationId: string) => {
+      const res = await fetch(`/api/reader/annotations/${annotationId}`, {
+        method: 'DELETE',
+      });
+
+      if (res.ok) {
+        // Refresh annotations for all loaded chapters
+        for (const position of visibleChapterIndices) {
+          fetchAnnotations(getSpineIndexForPosition(position));
+        }
+      } else {
+        throw new Error('Failed to delete comment');
+      }
+    },
+    [fetchAnnotations, visibleChapterIndices, getSpineIndexForPosition],
+  );
+
+  // Handle annotation click - seed the chat with the Q&A, scroll to note quote, or show comment
+  const handleAnnotationClick = useCallback(
+    (annotation: AnnotationRow, position: { x: number; y: number }) => {
+      if (annotation.type === 'comment') {
+        // For comments, show the comment popover
+        setActiveComment({ annotation, position });
+      } else if (annotation.type === 'note-quote') {
+        // For note-quote, open notes panel and scroll to the quote
+        setScrollToQuoteText(annotation.selectedText);
+        setActiveTab('notes');
+        setPanelOpen(true);
+      } else {
+        // For QA annotations, seed the chat
+        const content = annotation.content as {
+          question?: string;
+          answer?: string;
+        };
+        if (content.question && content.answer) {
+          setSeedMessages({
+            question: content.question,
+            answer: content.answer,
+          });
+          setActiveTab('chat');
+          setPanelOpen(true);
+        }
+      }
+    },
+    [],
+  );
 
   // Handle quote click in notes - navigate to document location
-  const handleQuoteClick = useCallback(async (quoteText: string) => {
-    // Find the note-quote annotation that matches this quote text
-    let matchingAnnotation: AnnotationRow | null = null;
+  const handleQuoteClick = useCallback(
+    async (quoteText: string) => {
+      // Find the note-quote annotation that matches this quote text
+      let matchingAnnotation: AnnotationRow | null = null;
 
-    for (const [, annotations] of annotationsByChapter) {
-      const found = annotations.find(
-        (a) => a.type === 'note-quote' && a.selectedText.trim() === quoteText.trim()
-      );
-      if (found) {
-        matchingAnnotation = found;
-        break;
+      for (const [, annotations] of annotationsByChapter) {
+        const found = annotations.find(
+          (a) =>
+            a.type === 'note-quote' &&
+            a.selectedText.trim() === quoteText.trim(),
+        );
+        if (found) {
+          matchingAnnotation = found;
+          break;
+        }
       }
-    }
 
-    if (!matchingAnnotation) {
-      console.warn('No matching note-quote annotation found for quote:', quoteText);
-      return;
-    }
-
-    const anchor = matchingAnnotation.anchor as EpubHighlightAnchor;
-
-    // Navigate to the chapter
-    await goToChapter(anchor.chapterIndex);
-
-    // Wait for chapter to render, then scroll to the text and highlight it
-    setTimeout(() => {
-      const chapterEl = chapterRefs.current.get(anchor.chapterIndex);
-      if (!chapterEl) return;
-
-      // Find the annotation span in the DOM
-      const annotationSpan = chapterEl.querySelector(
-        `[data-annotation-id="${matchingAnnotation.id}"]`
-      );
-      if (annotationSpan) {
-        // Scroll to the annotation
-        annotationSpan.scrollIntoView({ behavior: 'smooth', block: 'center' });
-
-        // Add flash highlight effect
-        annotationSpan.classList.add('annotation-flash');
-        setTimeout(() => {
-          annotationSpan.classList.remove('annotation-flash');
-        }, 2000);
+      if (!matchingAnnotation) {
+        console.warn(
+          'No matching note-quote annotation found for quote:',
+          quoteText,
+        );
+        return;
       }
-    }, 300);
-  }, [annotationsByChapter, goToChapter]);
+
+      const anchor = matchingAnnotation.anchor as EpubHighlightAnchor;
+
+      // Navigate to the chapter
+      await goToChapter(anchor.chapterIndex);
+
+      // Wait for chapter to render, then scroll to the text and highlight it
+      setTimeout(() => {
+        const position = chapters.findIndex(
+          (ch) => ch.spineIndex === anchor.chapterIndex,
+        );
+        if (position < 0) return;
+        const chapterEl = chapterRefs.current.get(position);
+        if (!chapterEl) return;
+
+        // Find the annotation span in the DOM
+        const annotationSpan = chapterEl.querySelector(
+          `[data-annotation-id="${matchingAnnotation.id}"]`,
+        );
+        if (annotationSpan) {
+          // Scroll to the annotation
+          annotationSpan.scrollIntoView({
+            behavior: 'smooth',
+            block: 'center',
+          });
+
+          // Add flash highlight effect
+          annotationSpan.classList.add('annotation-flash');
+          setTimeout(() => {
+            annotationSpan.classList.remove('annotation-flash');
+          }, 2000);
+        }
+      }, 300);
+    },
+    [annotationsByChapter, goToChapter, chapters],
+  );
 
   // Scroll tracking for progress (debounced)
   useEffect(() => {
@@ -694,7 +828,10 @@ export function EpubReader({
         const scrollHeight = container.scrollHeight - container.clientHeight;
         const scrollPosition = scrollHeight > 0 ? scrollTop / scrollHeight : 0;
 
-        onProgressChange(currentChapterIndex, scrollPosition);
+        onProgressChange(
+          getSpineIndexForPosition(currentChapterIndex),
+          scrollPosition,
+        );
       }, 1000);
     };
 
@@ -706,7 +843,7 @@ export function EpubReader({
         clearTimeout(scrollTimeoutRef.current);
       }
     };
-  }, [currentChapterIndex, onProgressChange]);
+  }, [currentChapterIndex, onProgressChange, getSpineIndexForPosition]);
 
   // Restore scroll position after initial chapter loads
   useEffect(() => {
@@ -736,8 +873,20 @@ export function EpubReader({
   // Loading state
   if (isLoadingDoc) {
     return (
-      <div className="flex flex-1 items-center justify-center">
-        <Loader2 className="size-8 animate-spin text-muted-foreground" />
+      <div className="flex h-dvh w-full items-center justify-center">
+        <div className="flex flex-col items-center gap-3 text-center">
+          <LineSpinner className="text-muted-foreground" />
+          <div className="space-y-1">
+            <p className="text-sm font-medium text-foreground">
+              Preparing your read...
+            </p>
+            {fromUpload && (
+              <p className="text-xs text-muted-foreground">
+                This can take a few seconds for larger files.
+              </p>
+            )}
+          </div>
+        </div>
       </div>
     );
   }
@@ -757,7 +906,7 @@ export function EpubReader({
   if (!epubDoc) return null;
 
   return (
-    <div className="flex h-full">
+    <div className="relative flex h-full">
       {/* Main reader area */}
       <motion.div
         className="flex flex-1 flex-col overflow-hidden bg-background"
@@ -766,9 +915,18 @@ export function EpubReader({
         transition={{ duration: 0.2 }}
       >
         {/* Header */}
-        <div className="flex items-center justify-between border-b bg-background/80 px-4 h-14 backdrop-blur-sm">
+        <div
+          className={cn(
+            'relative flex items-center justify-between border-b bg-background/80 px-4 h-14 backdrop-blur-sm',
+            !open && 'pl-16'
+          )}
+        >
+          {!open && (
+            <div className="absolute left-2 top-1/2 -translate-y-1/2">
+              <SidebarToggle className="md:px-2 md:h-fit" />
+            </div>
+          )}
           <div className="flex items-center gap-2 min-w-0">
-            <BookOpen className="size-4 text-muted-foreground shrink-0" />
             <span className="text-sm font-medium text-foreground truncate">
               {epubDoc.title}
             </span>
@@ -787,14 +945,18 @@ export function EpubReader({
                   <List className="size-4" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-64 max-h-96 overflow-y-auto">
+              <DropdownMenuContent
+                align="end"
+                className="w-64 max-h-96 overflow-y-auto"
+              >
                 {outline.length > 0
                   ? outline.map((item) => (
                       <DropdownMenuItem
                         key={item.id}
                         onClick={() => goToChapter(item.pageIndex)}
                         className={
-                          currentChapterIndex === item.pageIndex
+                          getSpineIndexForPosition(currentChapterIndex) ===
+                          item.pageIndex
                             ? 'bg-accent'
                             : ''
                         }
@@ -802,12 +964,12 @@ export function EpubReader({
                         <span className="truncate">{item.title}</span>
                       </DropdownMenuItem>
                     ))
-                  : chapters.map((ch) => (
+                  : chapters.map((ch, index) => (
                       <DropdownMenuItem
                         key={ch.id}
                         onClick={() => goToChapter(ch.spineIndex)}
                         className={
-                          currentChapterIndex === ch.spineIndex ? 'bg-accent' : ''
+                          currentChapterIndex === index ? 'bg-accent' : ''
                         }
                       >
                         <span className="truncate">{ch.title}</span>
@@ -817,21 +979,31 @@ export function EpubReader({
             </DropdownMenu>
 
             {/* Close button */}
-            <Button variant="ghost" size="sm" onClick={onClose} className="size-8 p-0">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onClose}
+              className="size-8 p-0"
+            >
               <X className="size-4" />
             </Button>
           </div>
         </div>
 
         {/* Chapter Content - Infinite Scroll */}
-        <div ref={scrollContainerRef} className="flex-1 overflow-auto scrollbar-none">
+        <div
+          ref={scrollContainerRef}
+          className="flex-1 overflow-auto scrollbar-none"
+        >
           <div className="w-full max-w-3xl mx-auto p-6">
             {visibleChapterIndices.map((index) => {
               const chapter = loadedChapters.get(index);
               if (!chapter) return null;
 
-              const highlights = highlightsByChapter.get(index) || [];
-              const annotations = annotationsByChapter.get(index) || [];
+              const highlights =
+                highlightsByChapter.get(chapter.spineIndex) || [];
+              const annotations =
+                annotationsByChapter.get(chapter.spineIndex) || [];
 
               return (
                 <div
@@ -846,10 +1018,16 @@ export function EpubReader({
                     html={chapter.html}
                     highlights={highlights}
                     annotations={annotations}
-                    onCreateHighlight={(data) => handleCreateHighlight(index, data)}
-                    onAskAI={(data) => handleAskAI(index, data)}
-                    onAddToNotes={(data) => handleAddToNotes(index, data)}
-                    onAddComment={(data) => handleAddComment(index, data)}
+                    onCreateHighlight={(data) =>
+                      handleCreateHighlight(chapter.spineIndex, data)
+                    }
+                    onAskAI={(data) => handleAskAI(chapter.spineIndex, data)}
+                    onAddToNotes={(data) =>
+                      handleAddToNotes(chapter.spineIndex, data)
+                    }
+                    onAddComment={(data) =>
+                      handleAddComment(chapter.spineIndex, data)
+                    }
                     onAnnotationClick={handleAnnotationClick}
                   />
                   {/* Chapter separator */}
@@ -863,16 +1041,10 @@ export function EpubReader({
             {/* Load more trigger */}
             <div ref={loadMoreTriggerRef} className="h-px" />
 
-            {/* Loading indicator */}
-            {isLoadingMore && (
-              <div className="flex items-center justify-center py-8">
-                <Loader2 className="size-6 animate-spin text-muted-foreground" />
-              </div>
-            )}
-
             {/* End of book indicator */}
             {visibleChapterIndices.length > 0 &&
-              visibleChapterIndices[visibleChapterIndices.length - 1] === chapters.length - 1 &&
+              visibleChapterIndices[visibleChapterIndices.length - 1] ===
+                chapters.length - 1 &&
               !isLoadingMore && (
                 <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">
                   End of book

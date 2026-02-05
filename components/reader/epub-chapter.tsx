@@ -405,12 +405,12 @@ export function EpubChapter({
   const getAnnotationColors = (type: string) => {
     switch (type) {
       case 'note-quote':
-        return 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-200 dark:hover:bg-emerald-900/50 border-emerald-200 dark:border-emerald-800';
+        return 'bg-zinc-100 dark:bg-zinc-900/40 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-900/60 border-zinc-200 dark:border-zinc-800';
       case 'comment':
-        return 'bg-violet-100 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400 hover:bg-violet-200 dark:hover:bg-violet-900/50 border-violet-200 dark:border-violet-800';
+        return 'bg-zinc-100 dark:bg-zinc-900/40 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-900/60 border-zinc-200 dark:border-zinc-800';
       case 'qa':
       default:
-        return 'bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400 hover:bg-orange-200 dark:hover:bg-orange-900/50 border-orange-200 dark:border-orange-800';
+        return 'bg-zinc-100 dark:bg-zinc-900/40 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-900/60 border-zinc-200 dark:border-zinc-800';
     }
   };
 
