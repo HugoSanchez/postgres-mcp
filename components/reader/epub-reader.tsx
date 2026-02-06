@@ -1070,6 +1070,7 @@ export function EpubReader({
           notes={notes}
           onNotesChange={setNotes}
           documentId={documentId}
+          documentType={documentType}
           documentTitle={epubDoc?.title}
           onAnnotationCreated={fetchAnnotations}
           seedMessages={seedMessages}
@@ -1093,6 +1094,7 @@ export function EpubReader({
           notes={notes}
           onNotesChange={setNotes}
           documentId={documentId}
+          documentType={documentType}
           documentTitle={epubDoc?.title}
           onAnnotationCreated={fetchAnnotations}
           seedMessages={seedMessages}

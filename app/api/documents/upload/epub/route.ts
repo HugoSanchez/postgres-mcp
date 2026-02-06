@@ -21,6 +21,7 @@ import { findDocumentByChecksum } from '@/lib/db/documents';
 import { parseEpub, tocToOutline } from '@/lib/epub/parse';
 import { rewriteImageUrls } from '@/lib/epub/rewrite-urls';
 import { sanitizeEpubChapter } from '@/lib/epub/sanitize';
+import { ingestDocumentChunks } from '@/lib/rag/ingest';
 
 // Maximum file size: 20MB
 const MAX_SIZE = 20 * 1024 * 1024;
@@ -196,6 +197,21 @@ export async function POST(request: Request) {
       chapters,
       outline: outline.length > 0 ? outline : undefined,
     });
+
+    try {
+      await ingestDocumentChunks({
+        documentId: document.id,
+        title: document.title,
+        mimeType: document.mimeType,
+        checksum: document.checksumSha256,
+        sources: chapters.map((chapter) => ({
+          text: chapter.text,
+          page: chapter.spineIndex,
+        })),
+      });
+    } catch (error) {
+      console.error('Failed to embed EPUB for RAG:', error);
+    }
 
     // ============================================================================
     // STEP 14: Return Success Response

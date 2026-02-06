@@ -2,6 +2,7 @@ import type {
   document,
   documentOutline,
   documentPage,
+  documentChunk,
   epubChapter,
   highlight,
   annotation,
@@ -17,6 +18,9 @@ export type InsertDocumentPage = typeof documentPage.$inferInsert;
 
 export type DocumentOutlineRow = typeof documentOutline.$inferSelect;
 export type InsertDocumentOutline = typeof documentOutline.$inferInsert;
+
+export type DocumentChunkRow = typeof documentChunk.$inferSelect;
+export type InsertDocumentChunk = typeof documentChunk.$inferInsert;
 
 export type EpubChapterRow = typeof epubChapter.$inferSelect;
 export type InsertEpubChapter = typeof epubChapter.$inferInsert;

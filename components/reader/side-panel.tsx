@@ -9,7 +9,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Notepad } from "./notepad";
 import { cn } from "@/lib/utils";
 import { Markdown } from "@/components/markdown";
-import type { EpubHighlightAnchor } from "@/lib/db/types";
+import type { EpubHighlightAnchor, DocumentType } from "@/lib/db/types";
 
 interface Message {
   id: string;
@@ -41,8 +41,9 @@ interface SidePanelProps {
   notes: string;
   onNotesChange: (notes: string) => void;
   documentId: string;
+  documentType: DocumentType;
   documentTitle?: string;
-  onAnnotationCreated?: (chapterIndex: number) => void;
+  onAnnotationCreated?: (anchorIndex: number) => void;
   seedMessages?: SeedMessages | null;
   onSeedMessagesConsumed?: () => void;
   scrollToQuoteText?: string | null;
@@ -61,6 +62,7 @@ export function SidePanel({
   notes,
   onNotesChange,
   documentId,
+  documentType,
   documentTitle,
   onAnnotationCreated,
   seedMessages,
@@ -174,6 +176,7 @@ export function SidePanel({
             role: m.role,
             content: m.content,
           })),
+          documentId,
           documentTitle,
           context: currentContext,
         }),
@@ -263,7 +266,7 @@ export function SidePanel({
         },
         body: JSON.stringify({
           documentId,
-          documentType: 'epub',
+          documentType,
           anchor: qa.anchor,
           selectedText: qa.selectedText,
           type: 'qa',
@@ -289,7 +292,7 @@ export function SidePanel({
     } finally {
       setSavingMessageId(null);
     }
-  }, [documentId, onAnnotationCreated]);
+  }, [documentId, documentType, onAnnotationCreated]);
 
   return (
     <div className="flex h-screen relative">

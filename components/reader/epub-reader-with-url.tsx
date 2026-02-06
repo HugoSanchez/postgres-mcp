@@ -65,7 +65,7 @@ export function EpubReaderWithUrl({
         }
       }, 500);
     },
-    [documentId]
+    [documentId, documentType]
   );
 
   const handleClose = useCallback(() => {

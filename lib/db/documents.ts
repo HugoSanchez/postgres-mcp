@@ -7,6 +7,7 @@ import postgres from 'postgres';
 import {
   annotation as annotationTable,
   document as documentTable,
+  documentChunk as documentChunkTable,
   documentOutline as documentOutlineTable,
   documentPage as documentPageTable,
   documentNote as documentNoteTable,
@@ -126,6 +127,10 @@ export async function deleteDocumentById(documentId: string) {
     await tx
       .delete(documentPageTable)
       .where(eq(documentPageTable.documentId, documentId));
+
+    await tx
+      .delete(documentChunkTable)
+      .where(eq(documentChunkTable.fileId, documentId));
 
     await tx
       .delete(epubChapterTable)

@@ -21,6 +21,7 @@ import { auth } from '@/app/(auth)/auth';
 import { createEpubWithChapters } from '@/lib/db/epub';
 import { findDocumentByChecksum } from '@/lib/db/documents';
 import { convertRelativeUrls } from '@/lib/reader/url-converter';
+import { ingestDocumentChunks } from '@/lib/rag/ingest';
 
 // Maximum content length to prevent memory issues (10MB)
 const MAX_CONTENT_LENGTH = 10 * 1024 * 1024;
@@ -412,6 +413,23 @@ export async function POST(request: Request) {
         },
       ],
     });
+
+    try {
+      await ingestDocumentChunks({
+        documentId,
+        title: article.title || 'Untitled',
+        mimeType: 'text/html',
+        checksum: checksumSha256,
+        sources: [
+          {
+            text: contentText,
+            page: 0,
+          },
+        ],
+      });
+    } catch (error) {
+      console.error('Failed to embed article for RAG:', error);
+    }
 
     return NextResponse.json(
       {

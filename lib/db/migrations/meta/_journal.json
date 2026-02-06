@@ -99,6 +99,13 @@
       "when": 1769900000000,
       "tag": "0013_amazing_thaddeus_ross",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1770367292531,
+      "tag": "0014_black_the_anarchist",
+      "breakpoints": true
     }
   ]
 }

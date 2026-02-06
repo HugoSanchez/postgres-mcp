@@ -14,7 +14,23 @@ import {
   index,
   uniqueIndex,
   real,
+  customType,
 } from 'drizzle-orm/pg-core';
+
+const vector1536 = customType<{ data: number[]; driverData: string }>({
+  dataType() {
+    return 'vector(1536)';
+  },
+  toDriver(value: number[]): string {
+    return `[${value.join(',')}]`;
+  },
+  fromDriver(value: string): number[] {
+    return value
+      .slice(1, -1)
+      .split(',')
+      .map((v) => Number.parseFloat(v.trim()));
+  },
+});
 
 export const user = pgTable('User', {
   id: uuid('id').primaryKey().notNull().defaultRandom(),
@@ -169,6 +185,29 @@ export const documentOutline = pgTable(
   (table) => ({
     pk: primaryKey({ columns: [table.id] }),
     docIdx: index('document_outline_doc_idx').on(table.documentId),
+  }),
+);
+
+export const documentChunk = pgTable(
+  'DocumentChunk',
+  {
+    id: text('id').notNull(),
+    fileId: uuid('fileId')
+      .notNull()
+      .references(() => document.id),
+    path: text('path').notNull(),
+    mimeType: text('mimeType').notNull(),
+    page: integer('page'),
+    tab: text('tab'),
+    text: text('text').notNull(),
+    embedding: vector1536('embedding').notNull(),
+    md5: text('md5'),
+    modifiedTime: timestamp('modifiedTime'),
+    updatedAt: timestamp('updatedAt').notNull().defaultNow(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.id] }),
+    fileIdx: index('document_chunk_file_idx').on(table.fileId),
   }),
 );
 
