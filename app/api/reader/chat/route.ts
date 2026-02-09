@@ -74,10 +74,10 @@ ${
   ragContext ? `\\n\\n${ragContext}` : ''
 }
 
-Help the user understand the text, answer questions about it, define words, explain concepts, and provide relevant context. Keep your responses concise and focused on what they're asking about.`;
+Help the user understand the text, answer questions about it, define words, explain concepts, and provide relevant context. Use the document excerpts as context, but feel free to draw on your broader knowledge to verify facts, provide additional background, or give more complete answers. Don't limit yourself to only what's explicitly stated in the excerpts. Keep your responses concise and focused on what they're asking about.`;
 
     const result = streamText({
-      model: anthropic('claude-3-haiku-20240307'),
+      model: anthropic('claude-sonnet-4-20250514'),
       system: systemPrompt,
       messages: messages.map(m => ({
         role: m.role,

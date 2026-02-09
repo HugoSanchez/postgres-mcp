@@ -4,10 +4,10 @@ import { useEffect, useRef, useCallback, useState } from 'react';
 import { X, Pencil, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import type { AnnotationRow } from '@/lib/db/types';
+import type { Annotation, CommentContent } from '@/lib/db/schema';
 
 interface CommentPopoverProps {
-  annotation: AnnotationRow;
+  annotation: Annotation;
   position: { x: number; y: number };
   onClose: () => void;
   onEdit: (id: string, newText: string) => Promise<void>;
@@ -27,8 +27,8 @@ export function CommentPopover({
   const [editText, setEditText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  const content = annotation.content as { text?: string };
-  const commentText = content?.text || '';
+  const content = annotation.content as CommentContent | null;
+  const commentText = content?.comment || '';
 
   const handleKeyDown = useCallback(
     (event: KeyboardEvent) => {

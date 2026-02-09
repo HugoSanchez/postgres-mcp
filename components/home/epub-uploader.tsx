@@ -17,29 +17,37 @@ export function EpubUploader() {
 
   const handleUpload = useCallback(
     async (file: File) => {
-      // Validate file type
-      if (
-        file.type !== 'application/epub+zip' &&
-        !file.name.endsWith('.epub')
-      ) {
-        toast.error('Please select an EPUB file');
+      const isEpub =
+        file.type === 'application/epub+zip' ||
+        file.name.toLowerCase().endsWith('.epub');
+      const isPdf =
+        file.type === 'application/pdf' ||
+        file.name.toLowerCase().endsWith('.pdf');
+
+      if (!isEpub && !isPdf) {
+        toast.error('Please select an EPUB or PDF file');
         return;
       }
 
       setIsUploading(true);
 
+      const endpoint = isPdf
+        ? '/api/documents/upload/pdf'
+        : '/api/documents/upload/epub';
+      const label = isPdf ? 'PDF' : 'EPUB';
+
       try {
         const formData = new FormData();
         formData.append('file', file);
 
-        const res = await fetch('/api/documents/upload/epub', {
+        const res = await fetch(endpoint, {
           method: 'POST',
           body: formData,
         });
 
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
-          throw new Error(body.error || 'Failed to upload EPUB');
+          throw new Error(body.error || `Failed to upload ${label}`);
         }
 
         const data = await res.json();
@@ -47,7 +55,7 @@ export function EpubUploader() {
         router.push(`/read/${data.documentId}?fromUpload=1`);
       } catch (err) {
         const message =
-          err instanceof Error ? err.message : 'Failed to upload EPUB';
+          err instanceof Error ? err.message : `Failed to upload ${label}`;
         toast.error(message);
       } finally {
         setIsUploading(false);
@@ -129,7 +137,7 @@ export function EpubUploader() {
 
         <div className="space-y-2">
           <p className="text-base font-medium text-foreground">
-            {isUploading ? 'Uploading...' : 'Drop your EPUB here'}
+            {isUploading ? 'Uploading...' : 'Drop your EPUB or PDF here'}
           </p>
           <p className="text-sm text-muted-foreground">
             or click to browse your files
@@ -139,7 +147,7 @@ export function EpubUploader() {
         <input
           ref={fileInputRef}
           type="file"
-          accept="application/epub+zip,.epub"
+          accept="application/epub+zip,application/pdf,.epub,.pdf"
           onChange={handleFileChange}
           className="hidden"
           disabled={isUploading}

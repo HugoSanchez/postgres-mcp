@@ -285,92 +285,46 @@
     display: block;
 }
 
-/* Highlight styles for EPUB reader */
-.highlight {
-    @apply rounded-sm cursor-pointer transition-colors;
+/* Margin indicator component styles for AI response annotations */
+.ai-response-margin-indicator {
+    position: absolute;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background-color: rgb(22 163 74 / 0.15);
+    border: 1.5px solid rgb(22 163 74 / 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    z-index: 10;
 }
 
-.highlight-pending {
-    background-color: rgb(156 163 175 / 0.4);
+.ai-response-margin-indicator:hover {
+    background-color: rgb(22 163 74 / 0.25);
+    border-color: rgb(22 163 74 / 0.7);
+    transform: scale(1.1);
 }
 
-.dark .highlight-pending {
-    background-color: rgb(107 114 128 / 0.4);
+.ai-response-margin-indicator svg {
+    width: 11px;
+    height: 11px;
+    color: rgb(22 163 74);
 }
 
-.highlight-yellow {
-    background-color: rgb(254 249 195 / 0.7);
+.dark .ai-response-margin-indicator {
+    background-color: rgb(74 222 128 / 0.1);
+    border-color: rgb(74 222 128 / 0.4);
 }
 
-.highlight-green {
-    background-color: rgb(187 247 208 / 0.7);
+.dark .ai-response-margin-indicator:hover {
+    background-color: rgb(74 222 128 / 0.2);
+    border-color: rgb(74 222 128 / 0.6);
 }
 
-.highlight-blue {
-    background-color: rgb(191 219 254 / 0.7);
-}
-
-.highlight-pink {
-    background-color: rgb(251 207 232 / 0.7);
-}
-
-.highlight-purple {
-    background-color: rgb(233 213 255 / 0.7);
-}
-
-/* Dark mode highlight variants - keep white text, use muted backgrounds */
-.dark .highlight-yellow {
-    background-color: rgb(113 63 18 / 0.6);
-    color: inherit;
-}
-
-.dark .highlight-green {
-    background-color: rgb(20 83 45 / 0.6);
-    color: inherit;
-}
-
-.dark .highlight-blue {
-    background-color: rgb(30 64 175 / 0.5);
-    color: inherit;
-}
-
-.dark .highlight-pink {
-    background-color: rgb(131 24 67 / 0.6);
-    color: inherit;
-}
-
-.dark .highlight-purple {
-    background-color: rgb(88 28 135 / 0.6);
-    color: inherit;
-}
-
-/* Annotation styles for pinned Q&A and other annotations */
-/* Single consistent underline style for all annotation types */
-.annotation {
-    @apply cursor-pointer transition-colors relative;
-    text-decoration: underline;
-    text-decoration-style: dotted;
-    text-decoration-color: rgb(115 115 115 / 0.6);
-    text-underline-offset: 3px;
-    text-decoration-thickness: 1.5px;
-}
-
-.dark .annotation {
-    text-decoration-color: rgb(163 163 163 / 0.6);
-}
-
-/* Prevent nested annotations from having multiple underlines */
-.annotation .annotation {
-    text-decoration: none;
-}
-
-/* Hover state for annotations - subtle background highlight */
-.annotation:hover {
-    background-color: rgb(115 115 115 / 0.1);
-}
-
-.dark .annotation:hover {
-    background-color: rgb(163 163 163 / 0.15);
+.dark .ai-response-margin-indicator svg {
+    color: rgb(74 222 128);
 }
 
 /* Annotation flash animation for navigation */

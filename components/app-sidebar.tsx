@@ -57,7 +57,7 @@ export function AppSidebar({ user }: { user: User | undefined }) {
                   <PlusIcon />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent align="end">Add a new dataset</TooltipContent>
+              <TooltipContent align="end">Start a new read</TooltipContent>
             </Tooltip>
           </div>
         </SidebarMenu>

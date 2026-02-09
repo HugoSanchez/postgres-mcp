@@ -12,7 +12,6 @@ import {
   documentPage as documentPageTable,
   documentNote as documentNoteTable,
   epubChapter as epubChapterTable,
-  highlight as highlightTable,
   readingProgress as readingProgressTable,
   suggestion as suggestionTable,
 } from './schema';
@@ -135,10 +134,6 @@ export async function deleteDocumentById(documentId: string) {
     await tx
       .delete(epubChapterTable)
       .where(eq(epubChapterTable.documentId, documentId));
-
-    await tx
-      .delete(highlightTable)
-      .where(eq(highlightTable.documentId, documentId));
 
     await tx
       .delete(annotationTable)

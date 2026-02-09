@@ -3,8 +3,8 @@ import type {
   documentOutline,
   documentPage,
   documentChunk,
+  documentSection,
   epubChapter,
-  highlight,
   annotation,
   readingProgress,
   documentNote,
@@ -25,17 +25,9 @@ export type InsertDocumentChunk = typeof documentChunk.$inferInsert;
 export type EpubChapterRow = typeof epubChapter.$inferSelect;
 export type InsertEpubChapter = typeof epubChapter.$inferInsert;
 
-export type HighlightRow = typeof highlight.$inferSelect;
-export type InsertHighlight = typeof highlight.$inferInsert;
+export type DocumentSectionRow = typeof documentSection.$inferSelect;
+export type InsertDocumentSection = typeof documentSection.$inferInsert;
 
-// EPUB-specific anchor type
-export interface EpubHighlightAnchor {
-  chapterIndex: number;
-  startOffset: number;
-  endOffset: number;
-}
-
-export type HighlightColor = 'yellow' | 'green' | 'blue' | 'pink' | 'purple';
 export type DocumentType = 'epub' | 'pdf' | 'article';
 
 export type ReadingProgressRow = typeof readingProgress.$inferSelect;
@@ -44,45 +36,30 @@ export type InsertReadingProgress = typeof readingProgress.$inferInsert;
 export type DocumentNoteRow = typeof documentNote.$inferSelect;
 export type InsertDocumentNote = typeof documentNote.$inferInsert;
 
-// Annotation types
+// Unified Annotation types (replaces old Highlight and Annotation tables)
 export type AnnotationRow = typeof annotation.$inferSelect;
 export type InsertAnnotation = typeof annotation.$inferInsert;
 
-export type AnnotationType = 'qa' | 'comment' | 'marker' | 'note-quote';
-export type AnnotationColor = 'orange' | 'yellow' | 'green' | 'blue' | 'pink' | 'purple';
+export type AnnotationType = 'highlight' | 'comment' | 'ai-response' | 'quote';
+export type AnnotationColor = 'yellow' | 'green' | 'blue' | 'pink' | 'purple' | 'orange';
 
 // Content types for different annotation kinds
-export interface QAContent {
-  question: string;
-  answer: string;
+export interface HighlightContent {
+  note?: string;
 }
 
 export interface CommentContent {
-  text: string;
+  comment: string;
 }
 
-export interface MarkerContent {
-  symbol: '!!' | '?' | '***' | 'bookmark';
+export interface AIResponseContent {
+  question: string;
+  answer: string;
+  model?: string;
 }
 
-// Empty object - note-quote stores quote text in selectedText field
-export type NoteQuoteContent = Record<string, never>;
-
-export type AnnotationContent = QAContent | CommentContent | MarkerContent | NoteQuoteContent;
-
-// Type guards for narrowing content type
-export function isQAContent(content: AnnotationContent): content is QAContent {
-  return 'question' in content && 'answer' in content;
+export interface QuoteContent {
+  noteId: string;
 }
 
-export function isCommentContent(content: AnnotationContent): content is CommentContent {
-  return 'text' in content && !('question' in content);
-}
-
-export function isMarkerContent(content: AnnotationContent): content is MarkerContent {
-  return 'symbol' in content;
-}
-
-export function isNoteQuoteContent(content: AnnotationContent): content is NoteQuoteContent {
-  return !('question' in content) && !('text' in content) && !('symbol' in content);
-}
+export type AnnotationContentType = HighlightContent | CommentContent | AIResponseContent | QuoteContent;

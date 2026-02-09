@@ -1,509 +1,392 @@
 'use client';
 
-import { useRef, useState, useCallback, useEffect, useMemo, useLayoutEffect } from 'react';
+import { useRef, useState, useCallback, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { MessageSquareText, MessageCircle, Bookmark, StickyNote } from 'lucide-react';
-import { SelectionPopover } from './selection-popover';
-import { applyHighlightsAndAnnotations } from '@/lib/epub/apply-highlights';
-import type { HighlightRow, HighlightColor, AnnotationRow } from '@/lib/db/types';
+import { Sparkles } from 'lucide-react';
+import { type Editor } from '@tiptap/react';
+import { TipTapRenderer } from './tiptap-renderer';
+import { SelectionToolbar, type AnnotationColor } from './selection-toolbar';
+import { applyAnnotationMark, applyAnnotationMarkByText, getSelectedText, hasAnnotationMark } from '@/lib/tiptap/annotation-helpers';
+import type { TipTapDocument } from '@/lib/tiptap/html-to-json';
+import type { Annotation } from '@/lib/db/schema';
 
-interface AnnotationMarker {
-  id: string;
-  type: string;
+// Track position for margin indicators
+// Groups multiple annotations with same selectedText into one indicator
+interface MarginIndicator {
+  annotationIds: string[]; // All annotation IDs for this text
+  selectedText: string;
   top: number;
-  rightOffset: number; // Horizontal offset to prevent overlapping markers
-  annotation: AnnotationRow;
-}
-
-interface PendingHighlight {
-  startOffset: number;
-  endOffset: number;
-  text: string;
-  markElement: HTMLElement;
-  rect: DOMRect;
 }
 
 interface EpubChapterProps {
   title: string;
-  html: string;
+  content: TipTapDocument;
+  sectionIndex: number;
+  documentId: string;
   className?: string;
-  highlights?: HighlightRow[];
-  annotations?: AnnotationRow[];
-  onCreateHighlight?: (data: {
-    startOffset: number;
-    endOffset: number;
-    selectedText: string;
-    color: HighlightColor;
-  }) => Promise<void>;
-  onAskAI?: (data: { selectedText: string; startOffset: number; endOffset: number }) => void;
-  onAddToNotes?: (data: { selectedText: string; startOffset: number; endOffset: number }) => void;
-  onAddComment?: (data: { selectedText: string; startOffset: number; endOffset: number; text: string }) => void;
-  onAnnotationClick?: (annotation: AnnotationRow, position: { x: number; y: number }) => void;
+  annotations?: Annotation[];
+  onAnnotationCreated?: (annotation: Annotation) => void;
+  onAnnotationClick?: (annotation: Annotation, position: { x: number; y: number }) => void;
+  onMultiAnnotationClick?: (annotations: Annotation[], position: { x: number; y: number }) => void;
+  onAskAI?: (data: { selectedText: string; sectionIndex: number }) => void;
+  onAddToNotes?: (data: { selectedText: string; sectionIndex: number; annotationId: string }) => void;
+  onContentChange?: (content: TipTapDocument) => void;
 }
 
 /**
- * Calculate character offset from the start of the container to a given node/offset.
- */
-function getCharacterOffset(
-  container: HTMLElement,
-  targetNode: Node,
-  targetOffset: number
-): number {
-  const walker = document.createTreeWalker(
-    container,
-    NodeFilter.SHOW_TEXT,
-    null
-  );
-
-  let offset = 0;
-  let node = walker.nextNode();
-
-  while (node) {
-    if (node === targetNode) {
-      return offset + targetOffset;
-    }
-    offset += node.textContent?.length || 0;
-    node = walker.nextNode();
-  }
-
-  return offset;
-}
-
-/**
- * Renders a single EPUB chapter with sanitized HTML content
- * Uses Tailwind prose styling for consistent typography
+ * Renders a single document section with TipTap content and annotation support
  */
 export function EpubChapter({
   title,
-  html,
+  content,
+  sectionIndex,
+  documentId,
   className = '',
-  highlights = [],
   annotations = [],
-  onCreateHighlight,
+  onAnnotationCreated,
+  onAnnotationClick,
+  onMultiAnnotationClick,
   onAskAI,
   onAddToNotes,
-  onAddComment,
-  onAnnotationClick,
+  onContentChange,
 }: EpubChapterProps) {
-  const contentRef = useRef<HTMLDivElement>(null);
-  const articleRef = useRef<HTMLElement>(null);
-  const pendingHighlightRef = useRef<PendingHighlight | null>(null);
-  const lastAppliedHtmlRef = useRef<string>('');
-  const skipNextHtmlUpdateRef = useRef(false);
-  const [popoverData, setPopoverData] = useState<{ x: number; y: number } | null>(null);
-  const [isCreatingHighlight, setIsCreatingHighlight] = useState(false);
-  const isSelectingRef = useRef(false);
-  const [annotationMarkers, setAnnotationMarkers] = useState<AnnotationMarker[]>([]);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [editor, setEditor] = useState<Editor | null>(null);
+  const [isCreating, setIsCreating] = useState(false);
+  const [marginIndicators, setMarginIndicators] = useState<MarginIndicator[]>([]);
 
-  // Pre-process HTML with highlights and annotations applied
-  const htmlWithHighlights = useMemo(() => {
-    return applyHighlightsAndAnnotations(html, highlights, annotations);
-  }, [html, highlights, annotations]);
+  // Track which annotations have been synced to prevent duplicate processing
+  const syncedAnnotationsRef = useRef<Set<string>>(new Set());
 
-  // Set innerHTML manually to avoid React re-renders overwriting our DOM changes
-  // Use a ref to track what we last applied, to avoid resetting when we have pending marks
+  // Handle editor ready
+  const handleEditorReady = useCallback((editorInstance: Editor) => {
+    setEditor(editorInstance);
+  }, []);
+
+  // Sync annotations from database to editor marks
+  // This handles annotations created outside the editor (e.g., from chat panel)
   useEffect(() => {
-    if (contentRef.current && htmlWithHighlights !== lastAppliedHtmlRef.current) {
-      // Skip the update if we just created a highlight (DOM already has correct visual)
-      if (skipNextHtmlUpdateRef.current) {
-        skipNextHtmlUpdateRef.current = false;
-        lastAppliedHtmlRef.current = htmlWithHighlights;
-        return;
+    if (!editor || annotations.length === 0) return;
+
+    let hasChanges = false;
+
+    for (const annotation of annotations) {
+      // Skip if already synced
+      if (syncedAnnotationsRef.current.has(annotation.id)) {
+        continue;
       }
-      contentRef.current.innerHTML = htmlWithHighlights;
-      lastAppliedHtmlRef.current = htmlWithHighlights;
+
+      // Check if this annotation already has a mark in the editor
+      if (!hasAnnotationMark(editor, annotation.id)) {
+        // Apply the mark by finding the text
+        const applied = applyAnnotationMarkByText(editor, {
+          id: annotation.id,
+          color: annotation.color,
+          type: annotation.type,
+          text: annotation.selectedText,
+        });
+
+        if (applied) {
+          hasChanges = true;
+        }
+      }
+
+      // Mark as synced regardless of whether we applied (might already exist in content)
+      syncedAnnotationsRef.current.add(annotation.id);
     }
-  }, [htmlWithHighlights]);
 
-  // Calculate annotation marker positions after DOM updates
-  useLayoutEffect(() => {
-    const container = contentRef.current;
-    const article = articleRef.current;
-    if (!container || !article || annotations.length === 0) {
-      setAnnotationMarkers([]);
-      return;
+    // Persist content changes if marks were added
+    if (hasChanges && onContentChange) {
+      onContentChange(editor.getJSON() as TipTapDocument);
     }
+  }, [editor, annotations, onContentChange]);
 
-    // Wait a tick for DOM to be fully updated
-    requestAnimationFrame(() => {
-      const articleRect = article.getBoundingClientRect();
-      const rawMarkers: Array<{ id: string; type: string; top: number; annotation: AnnotationRow }> = [];
+  // Update margin indicator positions for AI response annotations
+  // Groups annotations with same selectedText into single indicator
+  useEffect(() => {
+    if (!containerRef.current) return;
 
-      for (const annotation of annotations) {
-        const element = container.querySelector(`[data-annotation-id="${annotation.id}"]`);
-        if (element) {
-          const rect = element.getBoundingClientRect();
-          // Calculate top position relative to the article container
-          const top = rect.top - articleRect.top;
-          rawMarkers.push({
-            id: annotation.id,
-            type: annotation.type,
+    const updateIndicatorPositions = () => {
+      const aiAnnotations = annotations.filter(a => a.type === 'ai-response');
+      const containerRect = containerRef.current?.getBoundingClientRect();
+
+      if (!containerRect) return;
+
+      // Group annotations by selectedText
+      const groupedByText = new Map<string, typeof aiAnnotations>();
+      for (const annotation of aiAnnotations) {
+        const existing = groupedByText.get(annotation.selectedText) || [];
+        existing.push(annotation);
+        groupedByText.set(annotation.selectedText, existing);
+      }
+
+      // Create one indicator per unique selectedText
+      const indicators: MarginIndicator[] = [];
+      for (const [selectedText, group] of groupedByText) {
+        // Use the first annotation's mark to position the indicator
+        const firstAnnotation = group[0];
+        const markElement = containerRef.current?.querySelector(
+          `[data-annotation-id="${firstAnnotation.id}"]`
+        );
+
+        if (markElement) {
+          const markRect = markElement.getBoundingClientRect();
+          // Position relative to container
+          const top = markRect.top - containerRect.top + (markRect.height / 2) - 10;
+          indicators.push({
+            annotationIds: group.map(a => a.id),
+            selectedText,
             top,
-            annotation,
           });
         }
       }
 
-      // Sort by top position
-      rawMarkers.sort((a, b) => a.top - b.top);
+      setMarginIndicators(indicators);
+    };
 
-      // Calculate horizontal offsets for overlapping markers
-      const MARKER_HEIGHT = 32; // Approximate height of marker button
-      const HORIZONTAL_OFFSET = 36; // Offset for each additional marker
-      const markers: AnnotationMarker[] = [];
+    // Initial update
+    updateIndicatorPositions();
 
-      for (let i = 0; i < rawMarkers.length; i++) {
-        const current = rawMarkers[i];
-        let rightOffset = 0;
+    // Update on window resize
+    window.addEventListener('resize', updateIndicatorPositions);
 
-        // Check how many markers before this one are at a similar vertical position
-        for (let j = 0; j < i; j++) {
-          const other = rawMarkers[j];
-          if (Math.abs(current.top - other.top) < MARKER_HEIGHT) {
-            rightOffset += HORIZONTAL_OFFSET;
-          }
-        }
-
-        markers.push({
-          ...current,
-          rightOffset,
-        });
-      }
-
-      setAnnotationMarkers(markers);
-    });
-  }, [annotations, htmlWithHighlights]);
-
-  // Remove pending highlight mark from DOM
-  const removePendingMark = useCallback(() => {
-    const pending = pendingHighlightRef.current;
-    if (pending?.markElement) {
-      const mark = pending.markElement;
-      const parent = mark.parentNode;
-      if (parent) {
-        // Unwrap: move children out and remove the mark
-        while (mark.firstChild) {
-          parent.insertBefore(mark.firstChild, mark);
-        }
-        parent.removeChild(mark);
-      }
+    // Also update when content might have changed
+    const observer = new MutationObserver(updateIndicatorPositions);
+    if (containerRef.current) {
+      observer.observe(containerRef.current, { childList: true, subtree: true });
     }
-    pendingHighlightRef.current = null;
-  }, []);
-
-  // Handle mouse events for selection
-  // Listen on container for mousedown, but document for mouseup (user may release outside container)
-  useEffect(() => {
-    const container = contentRef.current;
-    if (!container) return;
-
-    const handleMouseDown = () => {
-      // Clear any existing pending highlight when starting a new selection
-      if (pendingHighlightRef.current) {
-        removePendingMark();
-        setPopoverData(null);
-      }
-      isSelectingRef.current = true;
-    };
-
-    const handleMouseUp = () => {
-      if (!isSelectingRef.current) return;
-      isSelectingRef.current = false;
-
-      const windowSelection = window.getSelection();
-      if (!windowSelection || windowSelection.isCollapsed) {
-        return;
-      }
-
-      const range = windowSelection.getRangeAt(0);
-
-      // Check if selection is within our container
-      if (!container.contains(range.commonAncestorContainer)) {
-        return;
-      }
-
-      const text = windowSelection.toString().trim();
-      if (!text) {
-        return;
-      }
-
-      // Calculate character offsets
-      const startOffset = getCharacterOffset(
-        container,
-        range.startContainer,
-        range.startOffset
-      );
-      const endOffset = getCharacterOffset(
-        container,
-        range.endContainer,
-        range.endOffset
-      );
-
-      // Get bounding rect for popover positioning
-      const rect = range.getBoundingClientRect();
-
-      // Create a temporary mark element with pending style
-      const mark = document.createElement('mark');
-      mark.className = 'highlight highlight-pending';
-
-      try {
-        range.surroundContents(mark);
-      } catch {
-        // If surroundContents fails (spans multiple elements), use extractContents
-        const fragment = range.extractContents();
-        mark.appendChild(fragment);
-        range.insertNode(mark);
-      }
-
-      // Clear the native selection
-      windowSelection.removeAllRanges();
-
-      // Store the pending highlight in ref (no re-render)
-      pendingHighlightRef.current = {
-        startOffset,
-        endOffset,
-        text,
-        markElement: mark,
-        rect,
-      };
-
-      // Show popover (triggers re-render, but innerHTML is set via useEffect now)
-      setPopoverData({
-        x: rect.left + rect.width / 2,
-        y: rect.top,
-      });
-    };
-
-    container.addEventListener('mousedown', handleMouseDown);
-    // Listen on document for mouseup to catch selections that end outside the container
-    document.addEventListener('mouseup', handleMouseUp);
 
     return () => {
-      container.removeEventListener('mousedown', handleMouseDown);
-      document.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('resize', updateIndicatorPositions);
+      observer.disconnect();
     };
-  }, [removePendingMark]);
+  }, [annotations]);
 
-  // Handle clicks on annotation elements
-  useEffect(() => {
-    const container = contentRef.current;
-    if (!container || !onAnnotationClick) return;
-
-    const handleClick = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-      const annotationElement = target.closest('[data-annotation-id]') as HTMLElement | null;
-      if (annotationElement) {
-        const annotationId = annotationElement.getAttribute('data-annotation-id');
-        const annotation = annotations.find(a => a.id === annotationId);
-        if (annotation) {
-          e.preventDefault();
-          e.stopPropagation();
-          // Calculate position for popover
-          const rect = annotationElement.getBoundingClientRect();
-          const position = {
-            x: rect.left + rect.width / 2,
-            y: rect.top,
-          };
-          onAnnotationClick(annotation, position);
-        }
-      }
-    };
-
-    container.addEventListener('click', handleClick);
-    return () => container.removeEventListener('click', handleClick);
-  }, [annotations, onAnnotationClick]);
-
-  const handleSelectColor = useCallback(
-    async (color: HighlightColor) => {
-      const pending = pendingHighlightRef.current;
-      if (!pending || !onCreateHighlight) return;
-
-      setIsCreatingHighlight(true);
-      try {
-        // Update the mark's class to the selected color
-        pending.markElement.className = `highlight highlight-${color}`;
-
-        await onCreateHighlight({
-          startOffset: pending.startOffset,
-          endOffset: pending.endOffset,
-          selectedText: pending.text,
-          color,
-        });
-
-        // Skip the next HTML update since DOM already has the correct visual
-        skipNextHtmlUpdateRef.current = true;
-        // Clear pending (the real highlight will come from re-fetch)
-        pendingHighlightRef.current = null;
-        setPopoverData(null);
-      } catch (error) {
-        console.error('Failed to create highlight:', error);
-        // On error, remove the pending mark
-        removePendingMark();
-        setPopoverData(null);
-      } finally {
-        setIsCreatingHighlight(false);
+  // Handle annotation click
+  const handleAnnotationClick = useCallback(
+    (annotationId: string, position: { x: number; y: number }) => {
+      const annotation = annotations.find((a) => a.id === annotationId);
+      if (annotation && onAnnotationClick) {
+        onAnnotationClick(annotation, position);
       }
     },
-    [onCreateHighlight, removePendingMark]
+    [annotations, onAnnotationClick]
   );
 
-  const handleClosePopover = useCallback(() => {
-    removePendingMark();
-    setPopoverData(null);
-  }, [removePendingMark]);
+  // Create annotation via API
+  const createAnnotation = useCallback(
+    async (
+      type: 'highlight' | 'comment' | 'ai-response' | 'quote',
+      color: AnnotationColor,
+      content?: Record<string, unknown>
+    ): Promise<Annotation | null> => {
+      if (!editor) return null;
 
+      const selectedText = getSelectedText(editor);
+      if (!selectedText) return null;
+
+      // Generate ID for mark sync
+      const id = crypto.randomUUID();
+
+      try {
+        // Apply mark to editor first (optimistic update)
+        applyAnnotationMark(editor, { id, color, type });
+
+        // Create annotation in database
+        const response = await fetch('/api/annotations', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id,
+            documentId,
+            sectionIndex,
+            type,
+            selectedText,
+            color,
+            content,
+          }),
+        });
+
+        if (!response.ok) {
+          // Rollback mark on failure
+          editor.commands.removeAnnotation(id);
+          throw new Error('Failed to create annotation');
+        }
+
+        const { annotation } = await response.json();
+
+        // Notify parent of content change (for persistence)
+        if (onContentChange) {
+          onContentChange(editor.getJSON() as TipTapDocument);
+        }
+
+        // Notify parent of new annotation
+        if (onAnnotationCreated) {
+          onAnnotationCreated(annotation);
+        }
+
+        return annotation;
+      } catch (error) {
+        console.error('Failed to create annotation:', error);
+        return null;
+      }
+    },
+    [editor, documentId, sectionIndex, onContentChange, onAnnotationCreated]
+  );
+
+  // Handle highlight
+  const handleHighlight = useCallback(
+    async (color: AnnotationColor) => {
+      if (isCreating) return;
+      setIsCreating(true);
+      try {
+        await createAnnotation('highlight', color);
+      } finally {
+        setIsCreating(false);
+      }
+    },
+    [createAnnotation, isCreating]
+  );
+
+  // Handle comment - creates annotation and opens comment input
+  const handleComment = useCallback(async () => {
+    if (isCreating || !editor) return;
+
+    const selectedText = getSelectedText(editor);
+    if (!selectedText) return;
+
+    setIsCreating(true);
+    try {
+      // Get selection position before creating annotation
+      const selection = window.getSelection();
+      let position = { x: 0, y: 0 };
+      if (selection && selection.rangeCount > 0) {
+        const range = selection.getRangeAt(0);
+        const rect = range.getBoundingClientRect();
+        position = { x: rect.left + rect.width / 2, y: rect.top };
+      }
+
+      // Create a comment annotation with empty content initially
+      // The comment content will be added via update
+      const annotation = await createAnnotation('comment', 'blue', { comment: '' });
+
+      // Open comment editor (parent should handle this)
+      if (annotation && onAnnotationClick) {
+        onAnnotationClick(annotation, position);
+      }
+    } finally {
+      setIsCreating(false);
+    }
+  }, [createAnnotation, isCreating, editor, onAnnotationClick]);
+
+  // Handle add to notes
+  const handleAddToNotes = useCallback(async () => {
+    if (isCreating || !editor) return;
+
+    const selectedText = getSelectedText(editor);
+    if (!selectedText) return;
+
+    setIsCreating(true);
+    try {
+      const annotation = await createAnnotation('quote', 'purple');
+
+      if (annotation && onAddToNotes) {
+        onAddToNotes({
+          selectedText,
+          sectionIndex,
+          annotationId: annotation.id,
+        });
+      }
+    } finally {
+      setIsCreating(false);
+    }
+  }, [createAnnotation, isCreating, editor, sectionIndex, onAddToNotes]);
+
+  // Handle ask AI
   const handleAskAI = useCallback(() => {
-    const pending = pendingHighlightRef.current;
-    if (!pending || !onAskAI) return;
+    if (!editor || !onAskAI) return;
 
-    const { text, startOffset, endOffset } = pending;
-    // Remove the pending mark since we're not highlighting
-    removePendingMark();
-    setPopoverData(null);
-    onAskAI({ selectedText: text, startOffset, endOffset });
-  }, [onAskAI, removePendingMark]);
+    const selectedText = getSelectedText(editor);
+    if (!selectedText) return;
 
-  const handleAddToNotes = useCallback(() => {
-    const pending = pendingHighlightRef.current;
-    if (!pending || !onAddToNotes) return;
+    onAskAI({
+      selectedText,
+      sectionIndex,
+    });
+  }, [editor, sectionIndex, onAskAI]);
 
-    const { text, startOffset, endOffset } = pending;
-    // Remove the pending mark since we're not highlighting
-    removePendingMark();
-    setPopoverData(null);
-    onAddToNotes({ selectedText: text, startOffset, endOffset });
-  }, [onAddToNotes, removePendingMark]);
+  // Handle margin indicator click - supports multiple annotations for same text
+  const handleMarginIndicatorClick = useCallback(
+    (annotationIds: string[]) => {
+      const matchedAnnotations = annotations.filter(a => annotationIds.includes(a.id));
+      if (matchedAnnotations.length === 0) return;
 
-  const handleAddComment = useCallback((commentText: string) => {
-    const pending = pendingHighlightRef.current;
-    if (!pending || !onAddComment) return;
+      // Find the mark element to get position
+      const markElement = containerRef.current?.querySelector(
+        `[data-annotation-id="${annotationIds[0]}"]`
+      );
+      if (markElement) {
+        const rect = markElement.getBoundingClientRect();
+        const position = { x: rect.right + 30, y: rect.top };
 
-    const { text, startOffset, endOffset } = pending;
-    // Remove the pending mark since we're creating an annotation, not a highlight
-    removePendingMark();
-    setPopoverData(null);
-    onAddComment({ selectedText: text, startOffset, endOffset, text: commentText });
-  }, [onAddComment, removePendingMark]);
-
-  // Get icon component for annotation type
-  const getAnnotationIcon = (type: string) => {
-    switch (type) {
-      case 'qa':
-        return MessageCircle;
-      case 'comment':
-        return MessageSquareText;
-      case 'marker':
-        return Bookmark;
-      case 'note-quote':
-        return StickyNote;
-      default:
-        return MessageSquareText;
-    }
-  };
-
-  // Get color classes for annotation type
-  const getAnnotationColors = (type: string) => {
-    switch (type) {
-      case 'note-quote':
-        return 'bg-zinc-100 dark:bg-zinc-900/40 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-900/60 border-zinc-200 dark:border-zinc-800';
-      case 'comment':
-        return 'bg-zinc-100 dark:bg-zinc-900/40 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-900/60 border-zinc-200 dark:border-zinc-800';
-      case 'qa':
-      default:
-        return 'bg-zinc-100 dark:bg-zinc-900/40 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-900/60 border-zinc-200 dark:border-zinc-800';
-    }
-  };
-
-  // Get title for annotation type
-  const getAnnotationTitle = (type: string) => {
-    switch (type) {
-      case 'qa':
-        return 'Q&A annotation';
-      case 'comment':
-        return 'Comment';
-      case 'marker':
-        return 'Marker';
-      case 'note-quote':
-        return 'Quoted in notes';
-      default:
-        return 'Annotation';
-    }
-  };
+        if (matchedAnnotations.length === 1 && onAnnotationClick) {
+          // Single annotation - use existing handler
+          onAnnotationClick(matchedAnnotations[0], position);
+        } else if (onMultiAnnotationClick) {
+          // Multiple annotations - use new handler
+          onMultiAnnotationClick(matchedAnnotations, position);
+        } else if (onAnnotationClick) {
+          // Fallback to first annotation if multi handler not provided
+          onAnnotationClick(matchedAnnotations[0], position);
+        }
+      }
+    },
+    [annotations, onAnnotationClick, onMultiAnnotationClick]
+  );
 
   return (
     <motion.article
-      ref={articleRef}
+      ref={containerRef}
       className={`epub-chapter relative ${className}`}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.2 }}
     >
-      <div
-        ref={contentRef}
-        className="
-          font-serif prose prose-lg dark:prose-invert max-w-none
-          prose-headings:font-semibold
-          prose-a:text-primary prose-a:no-underline hover:prose-a:underline
-          prose-img:rounded-lg prose-img:shadow-md prose-img:mx-auto
-          prose-blockquote:border-l-primary prose-blockquote:bg-muted/30 prose-blockquote:py-1 prose-blockquote:px-4 prose-blockquote:rounded-r
-          prose-pre:bg-muted prose-pre:text-foreground
-          prose-code:text-foreground prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none
-          prose-hr:border-border
-          [&_.epub-chapter]:mb-0
-          [&_section]:mb-8
-          [&_aside]:border-l-2 [&_aside]:border-muted-foreground/30 [&_aside]:pl-4 [&_aside]:italic [&_aside]:text-muted-foreground
-          [&_table:not(:has(thead))]:block
-          [&_table:not(:has(thead))_tbody]:block
-          [&_table:not(:has(thead))_tr]:block
-          [&_table:not(:has(thead))_td]:block
-          [&_table:not(:has(thead))_td]:!border-none
-          [&_table:not(:has(thead))_td]:!p-0
-          [&_table:not(:has(thead))_td]:whitespace-nowrap
-        "
-      />
-
-      {/* Annotation margin markers - only visible on larger screens with margin space */}
-      {annotationMarkers.length > 0 && (
-        <div className="hidden xl:block absolute top-0 right-0 h-full pointer-events-none">
-          {annotationMarkers.map((marker) => {
-            const Icon = getAnnotationIcon(marker.type);
-            return (
-              <button
-                key={marker.id}
-                type="button"
-                onClick={(e) => {
-                  const rect = e.currentTarget.getBoundingClientRect();
-                  const position = {
-                    x: rect.left,
-                    y: rect.top + rect.height / 2,
-                  };
-                  onAnnotationClick?.(marker.annotation, position);
-                }}
-                className={`absolute pointer-events-auto p-1.5 rounded-full hover:scale-110 transition-all shadow-sm border ${getAnnotationColors(marker.type)}`}
-                style={{
-                  top: marker.top - 4,
-                  right: -48 - marker.rightOffset, // Base offset + additional offset for overlapping markers
-                }}
-                title={getAnnotationTitle(marker.type)}
-              >
-                <Icon className="h-4 w-4" />
-              </button>
-            );
-          })}
-        </div>
-      )}
-
-      {popoverData && (
-        <SelectionPopover
-          position={popoverData}
-          onSelectColor={handleSelectColor}
-          onAskAI={handleAskAI}
-          onAddToNotes={handleAddToNotes}
-          onAddComment={onAddComment ? handleAddComment : undefined}
-          onClose={handleClosePopover}
-          isLoading={isCreatingHighlight}
+      <div className="font-serif relative">
+        <TipTapRenderer
+          content={content}
+          onEditorReady={handleEditorReady}
+          onAnnotationClick={handleAnnotationClick}
         />
-      )}
+
+        {/* Selection toolbar */}
+        <SelectionToolbar
+          editor={editor}
+          onHighlight={handleHighlight}
+          onComment={handleComment}
+          onAddToNotes={handleAddToNotes}
+          onAskAI={handleAskAI}
+        />
+
+        {/* Margin indicators for AI response annotations (grouped by selectedText) */}
+        {marginIndicators.map(indicator => (
+          <button
+            key={indicator.annotationIds.join(',')}
+            type="button"
+            className="ai-response-margin-indicator"
+            style={{
+              top: indicator.top,
+              right: -32,
+            }}
+            onClick={() => handleMarginIndicatorClick(indicator.annotationIds)}
+            title={indicator.annotationIds.length > 1
+              ? `View ${indicator.annotationIds.length} AI responses`
+              : 'View AI response'}
+          >
+            <Sparkles />
+          </button>
+        ))}
+      </div>
     </motion.article>
   );
 }

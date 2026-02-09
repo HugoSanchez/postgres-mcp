@@ -7,8 +7,8 @@
  * 3. Deduplication via SHA-256 checksum
  * 4. Storage in Vercel Blob (for serving the original file)
  * 5. EPUB parsing (extracting chapters, metadata, and TOC)
- * 6. HTML sanitization (for safe rendering)
- * 7. Database persistence (document metadata, chapters, outline)
+ * 6. HTML sanitization and TipTap JSON conversion
+ * 7. Database persistence (document metadata, sections, outline)
  */
 
 import { put } from '@vercel/blob';
@@ -16,12 +16,13 @@ import { createHash } from 'node:crypto';
 import { NextResponse } from 'next/server';
 
 import { auth } from '@/app/(auth)/auth';
-import { createEpubWithChapters } from '@/lib/db/epub';
+import { createDocumentWithSections } from '@/lib/db/document-sections';
 import { findDocumentByChecksum } from '@/lib/db/documents';
 import { parseEpub, tocToOutline } from '@/lib/epub/parse';
 import { rewriteImageUrls } from '@/lib/epub/rewrite-urls';
 import { sanitizeEpubChapter } from '@/lib/epub/sanitize';
 import { ingestDocumentChunks } from '@/lib/rag/ingest';
+import { processHtmlForStorage } from '@/lib/tiptap/html-to-json';
 
 // Maximum file size: 20MB
 const MAX_SIZE = 20 * 1024 * 1024;
@@ -32,7 +33,7 @@ const MAX_SIZE = 20 * 1024 * 1024;
  * Handles EPUB file upload, parsing, and storage.
  *
  * Request body: FormData with a 'file' field containing the EPUB file
- * Response: { documentId, blobUrl, chapterCount } or error
+ * Response: { documentId, blobUrl, sectionCount } or error
  */
 export async function POST(request: Request) {
   // ============================================================================
@@ -155,9 +156,9 @@ export async function POST(request: Request) {
     }
 
     // ============================================================================
-    // STEP 11: Rewrite Image URLs and Prepare Chapter Data
+    // STEP 11: Rewrite Image URLs, Convert to TipTap JSON, and Prepare Sections
     // ============================================================================
-    const chapters = parsed.chapters.map((chapter) => {
+    const sections = parsed.chapters.map((chapter) => {
       // Rewrite image URLs to point to blob storage
       const htmlWithImages = rewriteImageUrls(
         chapter.html,
@@ -166,13 +167,23 @@ export async function POST(request: Request) {
         imageUrlMap
       );
 
+      // Sanitize HTML and convert to TipTap JSON
+      const sanitizedHtml = sanitizeEpubChapter(htmlWithImages);
+
+      // Debug: log HTML for sections with "poem" in title
+      if (chapter.title.toLowerCase().includes('poem')) {
+        console.log(`[EPUB] Raw HTML for "${chapter.title}" (first 2000 chars):`, htmlWithImages.slice(0, 2000));
+        console.log(`[EPUB] Sanitized HTML for "${chapter.title}" (first 2000 chars):`, sanitizedHtml.slice(0, 2000));
+      }
+
+      const { content, textContent } = processHtmlForStorage(sanitizedHtml);
+
       return {
         documentId: document.id,
-        spineIndex: chapter.spineIndex,
-        href: chapter.href,
+        index: chapter.spineIndex,
         title: chapter.title,
-        html: sanitizeEpubChapter(htmlWithImages), // Sanitize after URL rewriting
-        text: chapter.text, // Plain text for search/LLM context
+        content,
+        textContent,
         createdAt: now,
       };
     });
@@ -192,9 +203,9 @@ export async function POST(request: Request) {
     // ============================================================================
     // STEP 13: Store Everything in Database (Transaction)
     // ============================================================================
-    await createEpubWithChapters({
+    await createDocumentWithSections({
       document,
-      chapters,
+      sections,
       outline: outline.length > 0 ? outline : undefined,
     });
 
@@ -204,9 +215,9 @@ export async function POST(request: Request) {
         title: document.title,
         mimeType: document.mimeType,
         checksum: document.checksumSha256,
-        sources: chapters.map((chapter) => ({
-          text: chapter.text,
-          page: chapter.spineIndex,
+        sources: sections.map((section) => ({
+          text: section.textContent,
+          page: section.index,
         })),
       });
     } catch (error) {
@@ -220,7 +231,7 @@ export async function POST(request: Request) {
       {
         documentId: document.id,
         blobUrl: blobResult.url,
-        chapterCount: parsed.chapterCount,
+        sectionCount: sections.length,
         title: document.title,
         metadata: parsed.metadata,
       },

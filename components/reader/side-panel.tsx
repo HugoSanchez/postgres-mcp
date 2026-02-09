@@ -9,7 +9,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Notepad } from "./notepad";
 import { cn } from "@/lib/utils";
 import { Markdown } from "@/components/markdown";
-import type { EpubHighlightAnchor, DocumentType } from "@/lib/db/types";
+import type { DocumentType } from "@/lib/db/types";
 
 interface Message {
   id: string;
@@ -21,11 +21,18 @@ interface Message {
 interface SaveableQA {
   question: string;
   answer: string;
-  anchor: EpubHighlightAnchor;
+  sectionIndex: number;
   selectedText: string;
 }
 
-interface SeedMessages {
+// Anchor type for backwards compatibility with existing props
+interface ContextAnchor {
+  chapterIndex: number;
+  startOffset: number;
+  endOffset: number;
+}
+
+interface SeedMessage {
   question: string;
   answer: string;
 }
@@ -34,7 +41,7 @@ interface SidePanelProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   context: string;
-  contextAnchor: EpubHighlightAnchor | null;
+  contextAnchor: ContextAnchor | null;
   onClearContext: () => void;
   activeTab: "chat" | "notes";
   onTabChange: (tab: "chat" | "notes") => void;
@@ -43,8 +50,8 @@ interface SidePanelProps {
   documentId: string;
   documentType: DocumentType;
   documentTitle?: string;
-  onAnnotationCreated?: (anchorIndex: number) => void;
-  seedMessages?: SeedMessages | null;
+  onAnnotationCreated?: (sectionIndex: number) => void;
+  seedMessages?: SeedMessage[] | null;
   onSeedMessagesConsumed?: () => void;
   scrollToQuoteText?: string | null;
   onScrollToQuoteComplete?: () => void;
@@ -85,6 +92,9 @@ export function SidePanel({
   // Track saveable Q&A pairs (keyed by assistant message id)
   const saveableQAsRef = useRef<Map<string, SaveableQA>>(new Map());
 
+  // Track last used context/anchor so follow-up questions can still be pinned
+  const lastContextRef = useRef<{ context: string; anchor: ContextAnchor } | null>(null);
+
   const minWidth = 320;
   const maxWidth = 600;
 
@@ -114,26 +124,26 @@ export function SidePanel({
     };
   }, [isResizing]);
 
-  // Auto-populate input with context when panel opens
+  // Focus input when panel opens with context
   useEffect(() => {
-    if (open && context && input === "" && activeTab === "chat") {
-      if (context.startsWith("Define:")) {
-        setInput(context);
-      } else {
-        setInput(`What does this mean: "${context}"`);
-      }
+    if (open && context && activeTab === "chat") {
       setTimeout(() => inputRef.current?.focus(), 100);
     }
-  }, [open, context, input, activeTab]);
+  }, [open, context, activeTab]);
 
-  // Seed chat with messages from annotation click
+  // Seed chat with messages from annotation click (supports multiple Q&A pairs)
   useEffect(() => {
-    if (seedMessages) {
+    if (seedMessages && seedMessages.length > 0) {
       const timestamp = Date.now();
-      setMessages([
-        { id: `${timestamp}-q`, role: "user", content: seedMessages.question },
-        { id: `${timestamp}-a`, role: "assistant", content: seedMessages.answer },
-      ]);
+      // Build messages array with all Q&A pairs
+      const newMessages: Message[] = [];
+      seedMessages.forEach((qa, index) => {
+        newMessages.push(
+          { id: `${timestamp}-q-${index}`, role: "user", content: qa.question },
+          { id: `${timestamp}-a-${index}`, role: "assistant", content: qa.answer }
+        );
+      });
+      setMessages(newMessages);
       onSeedMessagesConsumed?.();
     }
   }, [seedMessages, onSeedMessagesConsumed]);
@@ -161,8 +171,21 @@ export function SidePanel({
     setIsTyping(true);
 
     // Capture anchor and context before clearing
-    const currentContext = context;
-    const currentAnchor = contextAnchor;
+    // Use current selection if available, otherwise fall back to last used context
+    const currentContext = context || lastContextRef.current?.context || null;
+    const currentAnchor = contextAnchor || lastContextRef.current?.anchor || null;
+
+    console.log('[SidePanel] handleSend context:', {
+      hasCurrentContext: !!context,
+      hasLastContext: !!lastContextRef.current?.context,
+      usingContext: currentContext?.substring(0, 50),
+    });
+
+    // Store for follow-up questions
+    if (context && contextAnchor) {
+      lastContextRef.current = { context, anchor: contextAnchor };
+    }
+
     onClearContext();
 
     try {
@@ -224,14 +247,16 @@ export function SidePanel({
         }
       }
 
-      // After response complete, store saveable Q&A if we have anchor data
+      // After response complete, store saveable Q&A if we have context data
       if (currentAnchor && currentContext && accumulatedContent) {
         saveableQAsRef.current.set(assistantMessageId, {
           question: questionText,
           answer: accumulatedContent,
-          anchor: currentAnchor,
+          sectionIndex: currentAnchor.chapterIndex, // chapterIndex is actually sectionIndex
           selectedText: currentContext,
         });
+        // Force re-render to show pin button (refs don't trigger re-renders)
+        setMessages(prev => [...prev]);
       }
     } catch (error) {
       console.error('Chat error:', error);
@@ -259,17 +284,17 @@ export function SidePanel({
 
     setSavingMessageId(messageId);
     try {
-      const response = await fetch('/api/reader/annotations', {
+      const response = await fetch('/api/annotations', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
           documentId,
-          documentType,
-          anchor: qa.anchor,
+          sectionIndex: qa.sectionIndex,
           selectedText: qa.selectedText,
-          type: 'qa',
+          type: 'ai-response',
+          color: 'blue',
           content: {
             question: qa.question,
             answer: qa.answer,
@@ -285,14 +310,14 @@ export function SidePanel({
       // Remove from saveable map since it's now saved
       saveableQAsRef.current.delete(messageId);
 
-      // Notify parent to refresh annotations for this chapter
-      onAnnotationCreated?.(qa.anchor.chapterIndex);
+      // Notify parent to refresh annotations for this section
+      onAnnotationCreated?.(qa.sectionIndex);
     } catch (error) {
       console.error('Failed to save annotation:', error);
     } finally {
       setSavingMessageId(null);
     }
-  }, [documentId, documentType, onAnnotationCreated]);
+  }, [documentId, onAnnotationCreated]);
 
   return (
     <div className="flex h-screen relative">

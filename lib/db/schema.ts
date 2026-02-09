@@ -263,43 +263,35 @@ export const epubChapter = pgTable(
 
 export type EpubChapter = InferSelectModel<typeof epubChapter>;
 
-export const highlight = pgTable(
-  'Highlight',
+// New unified document sections table (replaces epubChapter)
+// Stores TipTap JSON content for all document types
+export const documentSection = pgTable(
+  'DocumentSection',
   {
     id: uuid('id').notNull().defaultRandom(),
     documentId: uuid('documentId')
       .notNull()
       .references(() => document.id),
-    documentType: varchar('documentType', {
-      enum: ['epub', 'pdf', 'article'],
-    }).notNull(),
-    userId: uuid('userId')
-      .notNull()
-      .references(() => user.id),
-    anchor: jsonb('anchor').notNull(), // { chapterIndex, startOffset, endOffset }
-    selectedText: text('selectedText').notNull(),
-    color: varchar('color', {
-      enum: ['yellow', 'green', 'blue', 'pink', 'purple'],
-    })
-      .notNull()
-      .default('yellow'),
-    note: text('note'),
+    index: integer('index').notNull(), // ordering within document
+    title: text('title'), // optional, for TOC navigation
+    content: jsonb('content').notNull(), // TipTap JSON (source of truth)
+    textContent: text('textContent').notNull(), // plain text for RAG/search
     createdAt: timestamp('createdAt').notNull().defaultNow(),
-    updatedAt: timestamp('updatedAt').notNull().defaultNow(),
   },
   (table) => ({
     pk: primaryKey({ columns: [table.id] }),
-    documentIdx: index('highlight_document_idx').on(table.documentId),
-    userIdx: index('highlight_user_idx').on(table.userId),
-    documentUserIdx: index('highlight_document_user_idx').on(
+    docIdx: index('document_section_doc_idx').on(table.documentId),
+    docIndexIdx: uniqueIndex('document_section_doc_index_idx').on(
       table.documentId,
-      table.userId
+      table.index
     ),
   })
 );
 
-export type Highlight = InferSelectModel<typeof highlight>;
+export type DocumentSection = InferSelectModel<typeof documentSection>;
 
+// Unified annotation table - stores all annotation types
+// Annotations are anchored via TipTap marks in the document content
 export const annotation = pgTable(
   'Annotation',
   {
@@ -307,23 +299,20 @@ export const annotation = pgTable(
     documentId: uuid('documentId')
       .notNull()
       .references(() => document.id),
-    documentType: varchar('documentType', {
-      enum: ['epub', 'pdf', 'article'],
-    }).notNull(),
+    sectionIndex: integer('sectionIndex').notNull(), // which section contains this annotation
     userId: uuid('userId')
       .notNull()
       .references(() => user.id),
-    anchor: jsonb('anchor').notNull(), // { chapterIndex, startOffset, endOffset }
-    selectedText: text('selectedText').notNull(),
     type: varchar('type', {
-      enum: ['qa', 'comment', 'marker', 'note-quote'],
+      enum: ['highlight', 'comment', 'ai-response', 'quote'],
     }).notNull(),
-    content: jsonb('content').notNull(), // Structure varies by type
+    selectedText: text('selectedText').notNull(), // snapshot of the marked text
+    content: jsonb('content'), // type-specific data: { note?, comment?, question?, answer?, noteId? }
     color: varchar('color', {
-      enum: ['orange', 'yellow', 'green', 'blue', 'pink', 'purple'],
+      enum: ['yellow', 'green', 'blue', 'pink', 'purple', 'orange'],
     })
       .notNull()
-      .default('orange'),
+      .default('yellow'),
     createdAt: timestamp('createdAt').notNull().defaultNow(),
     updatedAt: timestamp('updatedAt').notNull().defaultNow(),
   },
@@ -335,11 +324,34 @@ export const annotation = pgTable(
       table.documentId,
       table.userId
     ),
+    sectionIdx: index('annotation_section_idx').on(
+      table.documentId,
+      table.sectionIndex
+    ),
     typeIdx: index('annotation_type_idx').on(table.type),
   })
 );
 
 export type Annotation = InferSelectModel<typeof annotation>;
+
+// Type definitions for annotation content
+export type HighlightContent = {
+  note?: string;
+};
+
+export type CommentContent = {
+  comment: string;
+};
+
+export type AIResponseContent = {
+  question: string;
+  answer: string;
+  model?: string;
+};
+
+export type QuoteContent = {
+  noteId: string; // reference to DocumentNote
+};
 
 export const readingProgress = pgTable(
   'ReadingProgress',

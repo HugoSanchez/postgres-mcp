@@ -18,10 +18,11 @@ import { createHash, randomUUID } from 'node:crypto';
 import { put } from '@vercel/blob';
 
 import { auth } from '@/app/(auth)/auth';
-import { createEpubWithChapters } from '@/lib/db/epub';
+import { createDocumentWithSections } from '@/lib/db/document-sections';
 import { findDocumentByChecksum } from '@/lib/db/documents';
 import { convertRelativeUrls } from '@/lib/reader/url-converter';
 import { ingestDocumentChunks } from '@/lib/rag/ingest';
+import { processHtmlForStorage } from '@/lib/tiptap/html-to-json';
 
 // Maximum content length to prevent memory issues (10MB)
 const MAX_CONTENT_LENGTH = 10 * 1024 * 1024;
@@ -378,16 +379,15 @@ export async function POST(request: Request) {
     });
 
     // ============================================================================
-    // STEP 9: Persist Article as a Single-Chapter Document
+    // STEP 9: Convert to TipTap JSON and Persist as Document Section
     // ============================================================================
     const now = new Date();
     const documentId = randomUUID();
 
-    const contentText =
-      article.textContent?.trim() ||
-      (container?.textContent?.trim() ?? '');
+    // Convert sanitized HTML to TipTap JSON
+    const { content, textContent } = processHtmlForStorage(sanitizedContent);
 
-    await createEpubWithChapters({
+    await createDocumentWithSections({
       document: {
         id: documentId,
         createdAt: now,
@@ -401,14 +401,13 @@ export async function POST(request: Request) {
         pageCount: 1,
         userId: session.user.id,
       },
-      chapters: [
+      sections: [
         {
           documentId,
-          spineIndex: 0,
-          href: finalUrl,
+          index: 0,
           title: article.title || 'Untitled',
-          html: sanitizedContent,
-          text: contentText,
+          content,
+          textContent,
           createdAt: now,
         },
       ],
@@ -422,7 +421,7 @@ export async function POST(request: Request) {
         checksum: checksumSha256,
         sources: [
           {
-            text: contentText,
+            text: textContent,
             page: 0,
           },
         ],
