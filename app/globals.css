@@ -288,11 +288,11 @@
 /* Margin indicator component styles for AI response annotations */
 .ai-response-margin-indicator {
     position: absolute;
-    width: 20px;
-    height: 20px;
+    width: 18px;
+    height: 18px;
     border-radius: 50%;
-    background-color: rgb(22 163 74 / 0.15);
-    border: 1.5px solid rgb(22 163 74 / 0.5);
+    background-color: transparent;
+    border: 1.5px solid rgb(22 163 74 / 0.4);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -302,29 +302,141 @@
 }
 
 .ai-response-margin-indicator:hover {
-    background-color: rgb(22 163 74 / 0.25);
-    border-color: rgb(22 163 74 / 0.7);
-    transform: scale(1.1);
+    background-color: rgb(22 163 74 / 0.1);
+    border-color: rgb(22 163 74 / 0.6);
 }
 
 .ai-response-margin-indicator svg {
-    width: 11px;
-    height: 11px;
+    width: 10px;
+    height: 10px;
+    color: rgb(22 163 74 / 0.7);
+}
+
+.ai-response-margin-indicator:hover svg {
     color: rgb(22 163 74);
 }
 
 .dark .ai-response-margin-indicator {
-    background-color: rgb(74 222 128 / 0.1);
     border-color: rgb(74 222 128 / 0.4);
 }
 
 .dark .ai-response-margin-indicator:hover {
-    background-color: rgb(74 222 128 / 0.2);
+    background-color: rgb(74 222 128 / 0.1);
     border-color: rgb(74 222 128 / 0.6);
 }
 
 .dark .ai-response-margin-indicator svg {
+    color: rgb(74 222 128 / 0.7);
+}
+
+.dark .ai-response-margin-indicator:hover svg {
     color: rgb(74 222 128);
+}
+
+/* Margin indicator component styles for quote annotations */
+.quote-margin-indicator {
+    position: absolute;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background-color: transparent;
+    border: 1.5px solid rgb(59 130 246 / 0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    z-index: 10;
+}
+
+.quote-margin-indicator:hover {
+    background-color: rgb(59 130 246 / 0.1);
+    border-color: rgb(59 130 246 / 0.6);
+}
+
+.quote-margin-indicator svg {
+    width: 10px;
+    height: 10px;
+    color: rgb(59 130 246 / 0.7);
+}
+
+.quote-margin-indicator:hover svg {
+    color: rgb(59 130 246);
+}
+
+.dark .quote-margin-indicator {
+    border-color: rgb(96 165 250 / 0.4);
+}
+
+.dark .quote-margin-indicator:hover {
+    background-color: rgb(96 165 250 / 0.1);
+    border-color: rgb(96 165 250 / 0.6);
+}
+
+.dark .quote-margin-indicator svg {
+    color: rgb(96 165 250 / 0.7);
+}
+
+.dark .quote-margin-indicator:hover svg {
+    color: rgb(96 165 250);
+}
+
+/* Margin indicator component styles for comment annotations */
+.comment-margin-indicator {
+    position: absolute;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background-color: transparent;
+    border: 1.5px solid rgb(234 179 8 / 0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    z-index: 10;
+}
+
+.comment-margin-indicator:hover {
+    background-color: rgb(234 179 8 / 0.1);
+    border-color: rgb(234 179 8 / 0.6);
+}
+
+.comment-margin-indicator svg {
+    width: 10px;
+    height: 10px;
+    color: rgb(234 179 8 / 0.7);
+}
+
+.comment-margin-indicator:hover svg {
+    color: rgb(234 179 8);
+}
+
+.dark .comment-margin-indicator {
+    border-color: rgb(250 204 21 / 0.4);
+}
+
+.dark .comment-margin-indicator:hover {
+    background-color: rgb(250 204 21 / 0.1);
+    border-color: rgb(250 204 21 / 0.6);
+}
+
+.dark .comment-margin-indicator svg {
+    color: rgb(250 204 21 / 0.7);
+}
+
+.dark .comment-margin-indicator:hover svg {
+    color: rgb(250 204 21);
+}
+
+/* Prevent double dotted underlines when underline-style annotations overlap */
+mark.annotation-quote mark.annotation-ai-response,
+mark.annotation-ai-response mark.annotation-quote,
+mark.annotation-comment mark.annotation-ai-response,
+mark.annotation-ai-response mark.annotation-comment,
+mark.annotation-quote mark.annotation-comment,
+mark.annotation-comment mark.annotation-quote {
+    text-decoration: none !important;
 }
 
 /* Annotation flash animation for navigation */
@@ -344,6 +456,25 @@
 @keyframes annotation-flash-dark {
     0%, 100% { background-color: transparent; }
     25%, 75% { background-color: rgb(52 211 153 / 0.3); }
+}
+
+/* Quote annotation flash animation (blue) */
+@keyframes quote-flash {
+    0%, 100% { background-color: transparent; }
+    25%, 75% { background-color: rgb(59 130 246 / 0.3); }
+}
+
+.quote-flash {
+    animation: quote-flash 2s ease;
+}
+
+.dark .quote-flash {
+    animation: quote-flash-dark 2s ease;
+}
+
+@keyframes quote-flash-dark {
+    0%, 100% { background-color: transparent; }
+    25%, 75% { background-color: rgb(96 165 250 / 0.3); }
 }
 
 @keyframes line-spinner-fade {

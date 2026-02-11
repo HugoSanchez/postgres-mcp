@@ -2,10 +2,9 @@
 
 import React from "react";
 import { useState, useRef, useEffect, useCallback } from "react";
-import { X, Send, Sparkles, FileText, PanelRightClose, PanelRight, Pin, Loader2 } from "lucide-react";
+import { X, Send, PanelRightClose, PanelRight, Pin, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Notepad } from "./notepad";
 import { cn } from "@/lib/utils";
 import { Markdown } from "@/components/markdown";
@@ -372,36 +371,17 @@ export function SidePanel({
         )}
         style={{ minWidth: width }}
         >
-          {/* Header with tabs */}
-          <div className="px-4 h-14 flex items-center border-b border-border shrink-0">
-            <Tabs value={activeTab} onValueChange={(v) => onTabChange(v as "chat" | "notes")} className="w-full">
-              <TabsList className="w-full bg-secondary">
-                <TabsTrigger value="chat" className="flex-1 gap-2 data-[state=active]:bg-card">
-                  <Sparkles className="h-4 w-4" />
-                  Chat
-                </TabsTrigger>
-                <TabsTrigger value="notes" className="flex-1 gap-2 data-[state=active]:bg-card">
-                  <FileText className="h-4 w-4" />
-                  Notes
-                </TabsTrigger>
-              </TabsList>
-            </Tabs>
-          </div>
-
-          {/* Content */}
+          {/* Content - tabs are now in the main header */}
           {activeTab === "chat" ? (
             <>
-              {/* Messages area */}
-              <ScrollArea className="flex-1 p-4" ref={scrollRef}>
+              {/* Messages area - pt-12 to align with header height */}
+              <ScrollArea className="flex-1 px-4 pt-12 pb-4" ref={scrollRef}>
                 {messages.length === 0 ? (
-                  <div className="h-full flex flex-col items-start justify-center px-6 py-12">
-                    <h3 className="text-2xl font-semibold text-foreground mb-2">
-                      Hey there!
-                    </h3>
-                    <p className="text-xl text-muted-foreground">
+                  <div className="h-full flex flex-col items-start justify-center px-4 py-12">
+                    <p className="text-sm text-muted-foreground">
                       {documentTitle
-                        ? `I see you are reading ${documentTitle}, what can I help you with?`
-                        : 'What can I help you with?'}
+                        ? `Ask anything about "${documentTitle}"...`
+                        : 'Ask anything about the text...'}
                     </p>
                   </div>
                 ) : (
@@ -416,10 +396,10 @@ export function SidePanel({
                       >
                         <div
                           className={cn(
-                            "max-w-[85%] rounded-2xl px-4 py-2.5 text-sm",
+                            "max-w-[90%] rounded-lg px-3 py-2 text-sm",
                             message.role === "user"
-                              ? "bg-accent text-accent-foreground"
-                              : "text-foreground prose prose-sm dark:prose-invert prose-p:my-2 prose-ul:my-2 prose-ol:my-2"
+                              ? "bg-muted/70 text-foreground"
+                              : "text-foreground prose prose-sm dark:prose-invert prose-p:my-1.5 prose-ul:my-1.5 prose-ol:my-1.5"
                           )}
                         >
                           {message.role === "assistant" ? (
@@ -467,50 +447,55 @@ export function SidePanel({
               </ScrollArea>
 
               {/* Input area */}
-              <div className="p-4 border-t border-border shrink-0">
+              <div className="p-3 border-t border-border/50 shrink-0">
                 {context && (
-                  <div className="mb-3 inline-flex items-center gap-1.5 px-2 py-1 bg-neutral-700 dark:bg-neutral-300 rounded-md">
-                    <span className="text-xs text-neutral-300 dark:text-neutral-600">
-                      Selection · {context.split(/\s+/).length} words
-                    </span>
+                  <div className="mb-2 inline-flex items-center gap-1.5 px-2 py-0.5 bg-muted rounded text-xs text-muted-foreground">
+                    <span>{context.split(/\s+/).length} words selected</span>
                     <button
                       type="button"
                       onClick={onClearContext}
-                      className="text-neutral-400 hover:text-neutral-200 dark:text-neutral-500 dark:hover:text-neutral-700"
+                      className="text-muted-foreground/60 hover:text-foreground"
                     >
                       <X className="h-3 w-3" />
                     </button>
                   </div>
                 )}
-                <div className="flex gap-2 items-end">
+                <div className="relative">
                   <textarea
                     ref={inputRef}
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={handleKeyDown}
                     placeholder="Ask about the text..."
-                    className="flex-1 resize-none bg-neutral-50 dark:bg-neutral-900 rounded-xl px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none min-h-[100px] max-h-[200px] scrollbar-none"
+                    className="w-full resize-none bg-muted/30 border border-border/50 rounded-lg px-3 py-2.5 pr-10 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-border min-h-[80px] max-h-[160px] scrollbar-none"
                     rows={3}
                   />
-                  <Button
-                    size="icon"
+                  <button
+                    type="button"
                     onClick={handleSend}
                     disabled={!input.trim() || isTyping}
-                    className="h-10 w-10 rounded-xl bg-neutral-800 text-neutral-100 hover:bg-neutral-700 dark:bg-neutral-200 dark:text-neutral-800 dark:hover:bg-neutral-300 shrink-0"
+                    className={cn(
+                      "absolute bottom-2.5 right-2.5 p-1.5 rounded",
+                      "text-muted-foreground hover:text-foreground",
+                      "disabled:opacity-30 disabled:cursor-not-allowed",
+                      "transition-colors"
+                    )}
                   >
                     <Send className="h-4 w-4" />
-                  </Button>
+                  </button>
                 </div>
               </div>
             </>
           ) : (
-            <Notepad
-              content={notes}
-              onContentChange={onNotesChange}
-              scrollToQuoteText={scrollToQuoteText}
-              onScrollToQuoteComplete={onScrollToQuoteComplete}
-              onQuoteClick={onQuoteClick}
-            />
+            <div className="flex-1 pt-12 overflow-hidden">
+              <Notepad
+                content={notes}
+                onContentChange={onNotesChange}
+                scrollToQuoteText={scrollToQuoteText}
+                onScrollToQuoteComplete={onScrollToQuoteComplete}
+                onQuoteClick={onQuoteClick}
+              />
+            </div>
           )}
         </div>
       </div>

@@ -26,41 +26,26 @@ export function AppSidebar({ user }: { user: User | undefined }) {
   return (
     <Sidebar className="group-data-[side=left]:border-r-0">
       <SidebarHeader>
-        <SidebarMenu>
-          <div className="flex flex-row justify-between items-center gap-2">
-            <div className="flex items-center gap-2">
-              <SidebarToggle className="md:px-2 md:h-fit" />
-              <Link
-                href="/"
+        <div className="h-12 flex flex-row items-center justify-between px-3">
+          <SidebarToggle />
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                type="button"
+                className="p-2 h-fit"
                 onClick={() => {
                   setOpenMobile(false);
+                  router.push('/');
+                  router.refresh();
                 }}
-                className="flex flex-row gap-3 items-center"
               >
-                <span className="text-lg font-semibold px-2 hover:bg-muted rounded-md cursor-pointer">
-                  Readings
-                </span>
-              </Link>
-            </div>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  type="button"
-                  className="p-2 h-fit"
-                  onClick={() => {
-                    setOpenMobile(false);
-                    router.push('/');
-                    router.refresh();
-                  }}
-                >
-                  <PlusIcon />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent align="end">Start a new read</TooltipContent>
-            </Tooltip>
-          </div>
-        </SidebarMenu>
+                <PlusIcon />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent align="end">Start a new read</TooltipContent>
+          </Tooltip>
+        </div>
       </SidebarHeader>
       <SidebarContent>
         <SidebarReadingProgress />

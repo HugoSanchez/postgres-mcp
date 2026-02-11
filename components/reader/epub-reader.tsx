@@ -701,10 +701,10 @@ export function EpubReader({
             block: 'center',
           });
 
-          // Add flash highlight effect
-          annotationSpan.classList.add('annotation-flash');
+          // Add flash highlight effect (blue for quotes)
+          annotationSpan.classList.add('quote-flash');
           setTimeout(() => {
-            annotationSpan.classList.remove('annotation-flash');
+            annotationSpan.classList.remove('quote-flash');
           }, 2000);
         }
       }, 300);
@@ -846,7 +846,7 @@ export function EpubReader({
         {/* Header */}
         <div
           className={cn(
-            'relative flex items-center justify-between border-b bg-background/80 px-4 h-14 backdrop-blur-sm',
+            'relative flex items-center justify-end border-b bg-background/80 px-4 h-12 backdrop-blur-sm',
             !open && 'pl-16'
           )}
         >
@@ -855,18 +855,38 @@ export function EpubReader({
               <SidebarToggle className="md:px-2 md:h-fit" />
             </div>
           )}
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="text-sm font-medium text-foreground truncate">
-              {epubDoc.title}
-            </span>
-            {currentChapter && (
-              <span className="text-xs text-muted-foreground truncate">
-                • {currentChapter.title}
-              </span>
-            )}
-          </div>
 
           <div className="flex items-center gap-1">
+            {/* Chat/Notes toggle - only show when panel is open */}
+            {panelOpen && !isMobile && (
+              <div className="flex items-center p-0.5 rounded-md bg-muted/50 mr-2">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("chat")}
+                  className={cn(
+                    "px-2.5 py-1 text-xs rounded transition-colors",
+                    activeTab === "chat"
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  Chat
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("notes")}
+                  className={cn(
+                    "px-2.5 py-1 text-xs rounded transition-colors",
+                    activeTab === "notes"
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  Notes
+                </button>
+              </div>
+            )}
+
             {/* TOC Dropdown */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -906,16 +926,6 @@ export function EpubReader({
                     ))}
               </DropdownMenuContent>
             </DropdownMenu>
-
-            {/* Close button */}
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={onClose}
-              className="size-8 p-0"
-            >
-              <X className="size-4" />
-            </Button>
           </div>
         </div>
 
@@ -925,6 +935,17 @@ export function EpubReader({
           className="flex-1 overflow-auto scrollbar-none"
         >
           <div className="w-full max-w-3xl mx-auto p-6">
+            {/* Document title and chapter */}
+            <div className="mb-8">
+              <h1 className="text-lg font-medium text-foreground">
+                {epubDoc.title}
+              </h1>
+              {currentChapter && (
+                <p className="text-sm text-muted-foreground mt-1">
+                  {currentChapter.title}
+                </p>
+              )}
+            </div>
             {visibleChapterIndices.map((index) => {
               const chapter = loadedChapters.get(index);
               if (!chapter) return null;

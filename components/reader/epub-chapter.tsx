@@ -2,7 +2,7 @@
 
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Sparkles } from 'lucide-react';
+import { Sparkles, Quote, MessageSquare } from 'lucide-react';
 import { type Editor } from '@tiptap/react';
 import { TipTapRenderer } from './tiptap-renderer';
 import { SelectionToolbar, type AnnotationColor } from './selection-toolbar';
@@ -15,7 +15,9 @@ import type { Annotation } from '@/lib/db/schema';
 interface MarginIndicator {
   annotationIds: string[]; // All annotation IDs for this text
   selectedText: string;
+  type: 'ai-response' | 'quote' | 'comment';
   top: number;
+  rightOffset: number; // Calculated offset when multiple indicators at same position
 }
 
 interface EpubChapterProps {
@@ -53,7 +55,7 @@ export function EpubChapter({
   const containerRef = useRef<HTMLDivElement>(null);
   const [editor, setEditor] = useState<Editor | null>(null);
   const [isCreating, setIsCreating] = useState(false);
-  const [marginIndicators, setMarginIndicators] = useState<MarginIndicator[]>([]);
+  const [allIndicators, setAllIndicators] = useState<MarginIndicator[]>([]);
 
   // Track which annotations have been synced to prevent duplicate processing
   const syncedAnnotationsRef = useRef<Set<string>>(new Set());
@@ -101,63 +103,100 @@ export function EpubChapter({
     }
   }, [editor, annotations, onContentChange]);
 
-  // Update margin indicator positions for AI response annotations
-  // Groups annotations with same selectedText into single indicator
+  // Update margin indicator positions for all annotation types
+  // Groups annotations by type and selectedText, calculates horizontal offset for collisions
   useEffect(() => {
     if (!containerRef.current) return;
 
-    const updateIndicatorPositions = () => {
-      const aiAnnotations = annotations.filter(a => a.type === 'ai-response');
+    const updateAllIndicatorPositions = () => {
       const containerRect = containerRef.current?.getBoundingClientRect();
-
       if (!containerRect) return;
 
-      // Group annotations by selectedText
-      const groupedByText = new Map<string, typeof aiAnnotations>();
-      for (const annotation of aiAnnotations) {
-        const existing = groupedByText.get(annotation.selectedText) || [];
-        existing.push(annotation);
-        groupedByText.set(annotation.selectedText, existing);
-      }
+      const indicatorTypes: Array<'ai-response' | 'quote' | 'comment'> = ['ai-response', 'quote', 'comment'];
+      const allIndicatorsTemp: MarginIndicator[] = [];
 
-      // Create one indicator per unique selectedText
-      const indicators: MarginIndicator[] = [];
-      for (const [selectedText, group] of groupedByText) {
-        // Use the first annotation's mark to position the indicator
-        const firstAnnotation = group[0];
-        const markElement = containerRef.current?.querySelector(
-          `[data-annotation-id="${firstAnnotation.id}"]`
-        );
+      // Create indicators for each type
+      for (const type of indicatorTypes) {
+        const typeAnnotations = annotations.filter(a => a.type === type);
 
-        if (markElement) {
-          const markRect = markElement.getBoundingClientRect();
-          // Position relative to container
-          const top = markRect.top - containerRect.top + (markRect.height / 2) - 10;
-          indicators.push({
-            annotationIds: group.map(a => a.id),
-            selectedText,
-            top,
-          });
+        // Group annotations by selectedText
+        const groupedByText = new Map<string, typeof typeAnnotations>();
+        for (const annotation of typeAnnotations) {
+          const existing = groupedByText.get(annotation.selectedText) || [];
+          existing.push(annotation);
+          groupedByText.set(annotation.selectedText, existing);
+        }
+
+        // Create one indicator per unique selectedText for this type
+        for (const [selectedText, group] of groupedByText) {
+          const firstAnnotation = group[0];
+          const markElement = containerRef.current?.querySelector(
+            `[data-annotation-id="${firstAnnotation.id}"]`
+          );
+
+          if (markElement) {
+            const markRect = markElement.getBoundingClientRect();
+            const top = markRect.top - containerRect.top + (markRect.height / 2) - 10;
+            allIndicatorsTemp.push({
+              annotationIds: group.map(a => a.id),
+              selectedText,
+              type,
+              top,
+              rightOffset: 0, // Will be calculated below
+            });
+          }
         }
       }
 
-      setMarginIndicators(indicators);
+      // Calculate horizontal offsets for indicators at similar vertical positions
+      const COLLISION_THRESHOLD = 15; // pixels - indicators within this range are considered colliding
+      const INDICATOR_SPACING = 24; // pixels between indicators
+
+      // Sort by top position for easier collision detection
+      allIndicatorsTemp.sort((a, b) => a.top - b.top);
+
+      // Group colliding indicators and assign offsets
+      for (let i = 0; i < allIndicatorsTemp.length; i++) {
+        const current = allIndicatorsTemp[i];
+        const collidingIndicators = [current];
+
+        // Find all indicators that collide with this one
+        for (let j = i + 1; j < allIndicatorsTemp.length; j++) {
+          const other = allIndicatorsTemp[j];
+          if (Math.abs(other.top - current.top) <= COLLISION_THRESHOLD) {
+            collidingIndicators.push(other);
+          } else {
+            break; // Since sorted, no more collisions possible
+          }
+        }
+
+        // Assign offsets to colliding indicators
+        if (collidingIndicators.length > 1) {
+          collidingIndicators.forEach((indicator, index) => {
+            indicator.rightOffset = index * INDICATOR_SPACING;
+          });
+          // Skip the ones we already processed
+          i += collidingIndicators.length - 1;
+        }
+      }
+
+      setAllIndicators(allIndicatorsTemp);
     };
 
     // Initial update
-    updateIndicatorPositions();
+    updateAllIndicatorPositions();
 
     // Update on window resize
-    window.addEventListener('resize', updateIndicatorPositions);
+    window.addEventListener('resize', updateAllIndicatorPositions);
 
     // Also update when content might have changed
-    const observer = new MutationObserver(updateIndicatorPositions);
+    const observer = new MutationObserver(updateAllIndicatorPositions);
     if (containerRef.current) {
       observer.observe(containerRef.current, { childList: true, subtree: true });
     }
 
     return () => {
-      window.removeEventListener('resize', updateIndicatorPositions);
+      window.removeEventListener('resize', updateAllIndicatorPositions);
       observer.disconnect();
     };
   }, [annotations]);
@@ -368,24 +407,46 @@ export function EpubChapter({
           onAskAI={handleAskAI}
         />
 
-        {/* Margin indicators for AI response annotations (grouped by selectedText) */}
-        {marginIndicators.map(indicator => (
-          <button
-            key={indicator.annotationIds.join(',')}
-            type="button"
-            className="ai-response-margin-indicator"
-            style={{
-              top: indicator.top,
-              right: -32,
-            }}
-            onClick={() => handleMarginIndicatorClick(indicator.annotationIds)}
-            title={indicator.annotationIds.length > 1
+        {/* Margin indicators for all annotation types */}
+        {allIndicators.map(indicator => {
+          const classNames = {
+            'ai-response': 'ai-response-margin-indicator',
+            'quote': 'quote-margin-indicator',
+            'comment': 'comment-margin-indicator',
+          };
+          const icons = {
+            'ai-response': <Sparkles />,
+            'quote': <Quote />,
+            'comment': <MessageSquare />,
+          };
+          const titles = {
+            'ai-response': indicator.annotationIds.length > 1
               ? `View ${indicator.annotationIds.length} AI responses`
-              : 'View AI response'}
-          >
-            <Sparkles />
-          </button>
-        ))}
+              : 'View AI response',
+            'quote': indicator.annotationIds.length > 1
+              ? `View ${indicator.annotationIds.length} quotes in notes`
+              : 'View quote in notes',
+            'comment': indicator.annotationIds.length > 1
+              ? `View ${indicator.annotationIds.length} comments`
+              : 'View comment',
+          };
+
+          return (
+            <button
+              key={`${indicator.type}-${indicator.annotationIds.join(',')}`}
+              type="button"
+              className={classNames[indicator.type]}
+              style={{
+                top: indicator.top,
+                right: -32 - indicator.rightOffset,
+              }}
+              onClick={() => handleMarginIndicatorClick(indicator.annotationIds)}
+              title={titles[indicator.type]}
+            >
+              {icons[indicator.type]}
+            </button>
+          );
+        })}
       </div>
     </motion.article>
   );

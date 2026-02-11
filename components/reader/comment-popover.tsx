@@ -1,8 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useCallback, useState } from 'react';
-import { X, Pencil, Trash2 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { Trash2, Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Annotation, CommentContent } from '@/lib/db/schema';
 
@@ -23,69 +22,68 @@ export function CommentPopover({
 }: CommentPopoverProps) {
   const popoverRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const [isEditing, setIsEditing] = useState(false);
-  const [editText, setEditText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
   const content = annotation.content as CommentContent | null;
-  const commentText = content?.comment || '';
+  const initialComment = content?.comment || '';
+  const [text, setText] = useState(initialComment);
 
+  // Close on escape
   const handleKeyDown = useCallback(
     (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        if (isEditing) {
-          setIsEditing(false);
-          setEditText('');
+        onClose();
+      }
+    },
+    [onClose]
+  );
+
+  // Close on click outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (popoverRef.current && !popoverRef.current.contains(event.target as Node)) {
+        // Save before closing if text changed
+        if (text.trim() !== initialComment) {
+          handleSave();
         } else {
           onClose();
         }
       }
-    },
-    [onClose, isEditing]
-  );
+    };
 
-  useEffect(() => {
+    document.addEventListener('mousedown', handleClickOutside);
     document.addEventListener('keydown', handleKeyDown);
     return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [handleKeyDown]);
+  }, [handleKeyDown, text, initialComment, onClose]);
 
-  // Focus textarea when entering edit mode
+  // Auto-focus textarea
   useEffect(() => {
-    if (isEditing && textareaRef.current) {
+    if (textareaRef.current) {
       textareaRef.current.focus();
-      textareaRef.current.select();
+      // Move cursor to end
+      const len = textareaRef.current.value.length;
+      textareaRef.current.setSelectionRange(len, len);
     }
-  }, [isEditing]);
+  }, []);
 
-  const handleStartEdit = () => {
-    setEditText(commentText);
-    setIsEditing(true);
-  };
-
-  const handleSaveEdit = async () => {
-    if (!editText.trim() || editText.trim() === commentText) {
-      setIsEditing(false);
-      setEditText('');
+  const handleSave = async () => {
+    if (text.trim() === initialComment) {
+      onClose();
       return;
     }
 
     setIsLoading(true);
     try {
-      await onEdit(annotation.id, editText.trim());
-      setIsEditing(false);
-      setEditText('');
+      await onEdit(annotation.id, text.trim());
+      onClose();
     } catch (error) {
       console.error('Failed to update comment:', error);
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const handleCancelEdit = () => {
-    setIsEditing(false);
-    setEditText('');
   };
 
   const handleDelete = async () => {
@@ -104,100 +102,72 @@ export function CommentPopover({
     <div
       ref={popoverRef}
       className={cn(
-        'fixed z-50 w-72 rounded-lg',
-        'bg-popover border border-border shadow-xl',
+        'fixed z-50 w-64 rounded-lg overflow-hidden',
+        'bg-popover border border-border shadow-lg',
         'animate-in fade-in-0 zoom-in-95 duration-150'
       )}
       style={{
         left: position.x,
-        top: position.y - 10,
+        top: position.y - 8,
         transform: 'translate(-50%, -100%)',
       }}
     >
-      {/* Header with close button */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-border">
-        <span className="text-xs font-medium text-muted-foreground">Comment</span>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onClose}
-          className="h-6 w-6 p-0 hover:bg-accent"
-        >
-          <X className="h-4 w-4" />
-        </Button>
-      </div>
-
-      {/* Content */}
-      <div className="p-3">
-        {isEditing ? (
-          <>
-            <textarea
-              ref={textareaRef}
-              value={editText}
-              onChange={(e) => setEditText(e.target.value)}
-              disabled={isLoading}
-              className={cn(
-                'w-full min-h-[80px] p-2 text-sm rounded-md resize-none',
-                'bg-muted/50 border-none',
-                'focus:outline-none focus:ring-1 focus:ring-ring/50',
-                'disabled:opacity-50'
-              )}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                  e.preventDefault();
-                  handleSaveEdit();
-                }
-              }}
-            />
-            <div className="flex justify-end gap-2 mt-2">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleCancelEdit}
-                disabled={isLoading}
-                className="h-7 px-3 text-sm"
-              >
-                Cancel
-              </Button>
-              <Button
-                size="sm"
-                onClick={handleSaveEdit}
-                disabled={isLoading || !editText.trim()}
-                className="h-7 px-3 text-sm"
-              >
-                Save
-              </Button>
-            </div>
-          </>
-        ) : (
-          <>
-            <p className="text-sm text-foreground whitespace-pre-wrap">
-              {commentText}
-            </p>
-            <div className="flex justify-end gap-1 mt-3 pt-2 border-t border-border">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleStartEdit}
-                disabled={isLoading}
-                className="h-7 w-7 p-0 hover:bg-accent"
-                title="Edit comment"
-              >
-                <Pencil className="h-3.5 w-3.5" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleDelete}
-                disabled={isLoading}
-                className="h-7 w-7 p-0 hover:bg-destructive/10 hover:text-destructive"
-                title="Delete comment"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
-            </div>
-          </>
+      <textarea
+        ref={textareaRef}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        disabled={isLoading}
+        placeholder="Add a note..."
+        className={cn(
+          'w-full min-h-[72px] p-3 text-sm resize-none',
+          'bg-transparent border-none',
+          'focus:outline-none',
+          'placeholder:text-muted-foreground/60',
+          'disabled:opacity-50'
         )}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault();
+            handleSave();
+          }
+        }}
+      />
+
+      <div className="flex items-center justify-between px-3 py-2 border-t border-border/50 bg-muted/30">
+        <span className="text-xs text-muted-foreground">
+          {isLoading ? 'Saving...' : '⌘↵'}
+        </span>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={isLoading || !text.trim()}
+            className={cn(
+              'flex items-center gap-1 px-1.5 py-0.5 rounded text-muted-foreground/60',
+              'hover:text-primary hover:bg-primary/10',
+              'transition-colors text-xs',
+              'disabled:opacity-30 disabled:cursor-not-allowed'
+            )}
+            title="Save comment"
+          >
+            <Check className="h-3.5 w-3.5" />
+            <span>Save</span>
+          </button>
+          <button
+            type="button"
+            onClick={handleDelete}
+            disabled={isLoading}
+            className={cn(
+              'p-1 rounded text-muted-foreground/60',
+              'hover:text-destructive hover:bg-destructive/10',
+              'transition-colors',
+              'disabled:opacity-50'
+            )}
+            title="Delete comment"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
     </div>
   );

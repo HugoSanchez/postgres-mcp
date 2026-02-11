@@ -98,23 +98,32 @@ export const AnnotationMark = Mark.create<{
 
     // Determine style based on type
     const isAiResponse = type === 'ai-response';
+    const isQuote = type === 'quote';
+    const isComment = type === 'comment';
 
-    // Debug: log BEFORE style decision
-    console.log('[AnnotationMark] type check:', { type, isAiResponse, willUseBackground: !isAiResponse });
-
-    // Add extra class for ai-response type
+    // Add extra class for special types
     const classes = ['annotation-mark'];
     if (isAiResponse) {
       classes.push('annotation-ai-response');
     }
+    if (isQuote) {
+      classes.push('annotation-quote');
+    }
+    if (isComment) {
+      classes.push('annotation-comment');
+    }
 
-    // AI responses: dotted underline only, no background (must explicitly set background: transparent to override <mark> default)
-    // Other types: background highlight
-    const style = isAiResponse
-      ? 'background: transparent; text-decoration: underline; text-decoration-style: dotted; text-decoration-color: rgba(22, 163, 74, 0.7); text-underline-offset: 3px; text-decoration-thickness: 1.5px; cursor: pointer;'
-      : `background-color: ${backgroundColor}; padding: 0 2px; border-radius: 2px; cursor: pointer;`;
-
-    console.log('[AnnotationMark] final style:', style.substring(0, 50));
+    // AI responses: green dotted underline
+    // Quotes and comments: gray dotted underline
+    // Highlights: background color
+    let style: string;
+    if (isAiResponse) {
+      style = 'background: transparent; text-decoration: underline; text-decoration-style: dotted; text-decoration-color: rgba(22, 163, 74, 0.7); text-underline-offset: 3px; text-decoration-thickness: 1.5px; cursor: pointer;';
+    } else if (isQuote || isComment) {
+      style = 'background: transparent; text-decoration: underline; text-decoration-style: dotted; text-decoration-color: rgba(156, 163, 175, 0.7); text-underline-offset: 3px; text-decoration-thickness: 1.5px; cursor: pointer;';
+    } else {
+      style = `background-color: ${backgroundColor}; padding: 0 2px; border-radius: 2px; cursor: pointer;`;
+    }
 
     return [
       'mark',
